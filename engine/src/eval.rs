@@ -227,15 +227,19 @@ impl AnimationEngine {
 
             visiting.push(idx);
 
-            let (parent_matrix, parent_opacity) = match &local_evals[idx].layer.parent_id {
-                Some(p_id) => {
-                    if let Some(&p_idx) = layer_map.get(p_id.as_str()) {
-                        resolve_world(p_idx, local_evals, layer_map, world_transforms, world_opacities, visiting)
-                    } else {
-                        (Affine2D::IDENTITY, 1.0)
+            let (parent_matrix, parent_opacity) = if local_evals[idx].layer.relative_to_parent {
+                match &local_evals[idx].layer.parent_id {
+                    Some(p_id) => {
+                        if let Some(&p_idx) = layer_map.get(p_id.as_str()) {
+                            resolve_world(p_idx, local_evals, layer_map, world_transforms, world_opacities, visiting)
+                        } else {
+                            (Affine2D::IDENTITY, 1.0)
+                        }
                     }
+                    None => (Affine2D::IDENTITY, 1.0),
                 }
-                None => (Affine2D::IDENTITY, 1.0),
+            } else {
+                (Affine2D::IDENTITY, 1.0)
             };
 
             visiting.pop();
@@ -346,6 +350,7 @@ mod tests {
                 y: 50.0,
                 ..Default::default()
             },
+            relative_to_parent: true,
             tracks: LayerTracks {
                 position: vec![
                     Keyframe::new(0.0, [50.0, 50.0], Easing::Linear),
@@ -368,6 +373,7 @@ mod tests {
                 y: 0.0,
                 ..Default::default()
             },
+            relative_to_parent: true,
             tracks: LayerTracks::default(),
         };
 

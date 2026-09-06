@@ -4,7 +4,7 @@ import { jq79 } from 'jq79/vite';
 export default defineConfig({
   root: 'src',
   publicDir: '../public',
-  plugins: [jq79()],
+  plugins: [jq79({ exclude: /index\.html$/ })],
   server: {
     port: 3000,
     open: false,

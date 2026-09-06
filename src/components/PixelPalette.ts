@@ -70,6 +70,8 @@ export class PixelPalette {
     this.onSelectColors?.(this.primaryColor, this.secondaryColor);
   }
 
+  private isTempSwapped: boolean = false;
+
   public swapColors(): void {
     const temp = this.primaryColor;
     this.primaryColor = this.secondaryColor;
@@ -80,11 +82,44 @@ export class PixelPalette {
     this.onSelectColors?.(this.primaryColor, this.secondaryColor);
   }
 
+  private updateSwapButtonActive(active: boolean): void {
+    const btn = this.element.querySelector('.btn-swap-colors');
+    if (btn) {
+      btn.classList.toggle('active', active);
+    }
+  }
+
   private initKeyboardShortcut(): void {
     window.addEventListener('keydown', (e: KeyboardEvent) => {
-      // 'x' or 'X' swaps primary and secondary colors if not typing in input
-      if ((e.key === 'x' || e.key === 'X') && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+
+      // 'x' or 'X' swaps primary and secondary colors permanently
+      if (e.key === 'x' || e.key === 'X') {
         this.swapColors();
+        return;
+      }
+
+      // Holding CMD or ALT temporarily activates btn-swap-colors
+      if ((e.key === 'Meta' || e.key === 'Alt') && !this.isTempSwapped) {
+        this.isTempSwapped = true;
+        this.swapColors();
+        this.updateSwapButtonActive(true);
+      }
+    });
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (this.isTempSwapped && (e.key === 'Meta' || e.key === 'Alt') && !e.metaKey && !e.altKey) {
+        this.isTempSwapped = false;
+        this.swapColors();
+        this.updateSwapButtonActive(false);
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      if (this.isTempSwapped) {
+        this.isTempSwapped = false;
+        this.swapColors();
+        this.updateSwapButtonActive(false);
       }
     });
   }
@@ -94,19 +129,19 @@ export class PixelPalette {
       <div class="panel-header palette-header-dual">
         <span class="panel-title">Palette</span>
         <div class="dual-color-slots">
-          <div class="color-slot-display" title="Color 1: Clic Izquierdo en cualquier muestra">
-            <span class="slot-tag">Izq</span>
+          <div class="color-slot-display" title="Color I (Izquierdo): Clic en cualquier muestra">
+            <span class="slot-tag">I</span>
             <span class="slot-color-preview" style="background-color: ${this.primaryColor}"></span>
           </div>
-          <button class="btn-swap-colors" title="Intercambiar colores [X]">⇄</button>
-          <div class="color-slot-display" title="Color 2: Clic Derecho o CMD/ALT en cualquier muestra">
-            <span class="slot-tag">Der</span>
+          <button class="btn-swap-colors ${this.isTempSwapped ? 'active' : ''}" title="Intercambiar colores [X] (o mantener CMD/ALT)">⇄</button>
+          <div class="color-slot-display" title="Color D (Derecho): Clic Derecho en cualquier muestra">
+            <span class="slot-tag">D</span>
             <span class="slot-color-preview" style="background-color: ${this.secondaryColor}"></span>
           </div>
         </div>
       </div>
       <div class="palette-swatches"></div>
-      <div class="palette-hint-text">Clic Izq: Color 1 • Clic Der o CMD/ALT: Color 2 • [X]: Intercambiar</div>
+      <div class="palette-hint-text">Clic Izq: Color I • Clic Der: Color D • CMD/ALT: Intercambio Temp • [X]: Intercambiar</div>
     `;
 
     this.element.querySelector('.btn-swap-colors')?.addEventListener('click', (e) => {
@@ -123,14 +158,14 @@ export class PixelPalette {
       const swatch = document.createElement('button');
       swatch.className = `palette-swatch ${isPrimary ? 'selected-primary' : ''} ${isSecondary ? 'selected-secondary' : ''}`;
       swatch.style.backgroundColor = color;
-      swatch.title = `${color}\n• Clic Izq: Color 1 (Izq)\n• Clic Der / CMD: Color 2 (Der)`;
+      swatch.title = `${color}\n• Clic Izq: Color I (Izq)\n• Clic Der: Color D (Der)`;
 
       if (isPrimary && isSecondary) {
-        swatch.innerHTML = `<span class="swatch-badge dual">1|2</span>`;
+        swatch.innerHTML = `<span class="swatch-badge dual">I|D</span>`;
       } else if (isPrimary) {
-        swatch.innerHTML = `<span class="swatch-badge primary">1</span>`;
+        swatch.innerHTML = `<span class="swatch-badge primary">I</span>`;
       } else if (isSecondary) {
-        swatch.innerHTML = `<span class="swatch-badge secondary">2</span>`;
+        swatch.innerHTML = `<span class="swatch-badge secondary">D</span>`;
       }
 
       // Left click on swatch directly sets Color 1 (or Color 2 if CMD/ALT held)

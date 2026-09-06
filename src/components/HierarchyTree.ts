@@ -11,12 +11,14 @@ export interface LayerNode {
   z_index: number;
   visible: boolean;
   pivot?: { x: number; y: number };
+  relative_to_parent?: boolean;
 }
 
 export interface HierarchyTreeOptions {
   onSelectLayer?: (layerId: string) => void;
   onAddLayer?: () => void;
   onTogglePivotMode?: () => void;
+  onToggleLayerRelative?: (layerId: string) => void;
   onReorderLayer?: (layerId: string, targetIndex: number, newParentId: string | null) => void;
 }
 
@@ -25,6 +27,7 @@ export class HierarchyTree {
   private onSelectLayer?: (layerId: string) => void;
   private onAddLayer?: () => void;
   private onTogglePivotMode?: () => void;
+  private onToggleLayerRelative?: (layerId: string) => void;
   private onReorderLayer?: (layerId: string, targetIndex: number, newParentId: string | null) => void;
   private isPivotModeActive: boolean = false;
 
@@ -32,6 +35,7 @@ export class HierarchyTree {
     this.onSelectLayer = options.onSelectLayer;
     this.onAddLayer = options.onAddLayer;
     this.onTogglePivotMode = options.onTogglePivotMode;
+    this.onToggleLayerRelative = options.onToggleLayerRelative;
     this.onReorderLayer = options.onReorderLayer;
     this.element = document.createElement('div');
     this.element.className = 'hierarchy-panel';
@@ -82,6 +86,13 @@ export class HierarchyTree {
         </div>
         <div class="layer-actions">
           ${
+            isChild
+              ? `<button class="btn-relative-toggle ${layer.relative_to_parent !== false ? 'active' : ''}" title="Posición relativa a la capa padre (Clic para alternar relativo/absoluto)">
+                   ${layer.relative_to_parent !== false ? '🔗 Rel' : '🔓 Abs'}
+                 </button>`
+              : ''
+          }
+          ${
             isSelected
               ? `<button class="btn-pivot-toggle ${this.isPivotModeActive ? 'active' : ''}" title="Definir eje de giro (pivote) en el canvas">
                    📍 Pivote
@@ -94,6 +105,11 @@ export class HierarchyTree {
 
       item.addEventListener('click', (e) => {
         if (item.classList.contains('is-dragging')) return;
+        if ((e.target as HTMLElement).closest('.btn-relative-toggle')) {
+          e.stopPropagation();
+          this.onToggleLayerRelative?.(layer.id);
+          return;
+        }
         // If clicking pivot button, don't re-select layer
         if ((e.target as HTMLElement).closest('.btn-pivot-toggle')) {
           e.stopPropagation();

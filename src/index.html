@@ -569,13 +569,16 @@
     }
 
     .timeline-docked-panel {
-      height: var(--timeline-height);
-      min-height: var(--timeline-height);
+      height: auto;
+      min-height: 168px;
+      max-height: 48vh;
+      flex-shrink: 0;
       border-top: 1px solid var(--panel-border);
       background: var(--panel);
       display: flex;
       flex-direction: column;
-      overflow: hidden;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     .sidebar-docked-panel {
@@ -619,14 +622,99 @@
       letter-spacing: 0.05em;
     }
 
-    /* FrameStrip Component */
+    /* FrameStrip Component - Auto-growing container */
     .framestrip-container {
-      height: 100%;
+      min-height: 100%;
+      height: auto;
       display: flex;
       flex-direction: column;
       justify-content: flex-start;
-      gap: 0.85rem;
+      gap: 0.65rem;
       padding: 0.65rem 0.85rem;
+    }
+
+    /* Animation Clips Tabs Strip */
+    .animation-tabs-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.4rem;
+    }
+
+    .anim-tabs-list {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #223247 transparent;
+    }
+
+    .btn-anim-tab {
+      background: #0f1723;
+      color: #94a3b8;
+      border: 1px solid #202e42;
+      padding: 0.22rem 0.55rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.12s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .btn-anim-tab:hover {
+      background: #182638;
+      border-color: #38bdf8;
+      color: #e2e8f0;
+    }
+
+    .btn-anim-tab.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+    }
+
+    .anim-tab-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+      color: #7dd3fc;
+    }
+
+    .btn-anim-tab.active .anim-tab-badge {
+      background: rgba(255, 255, 255, 0.22);
+      color: #ffffff;
+    }
+
+    .btn-anim-tab-new {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px dashed #283e58;
+      color: #38bdf8;
+      padding: 0.22rem 0.55rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.12s ease;
+    }
+
+    .btn-anim-tab-new:hover {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: #38bdf8;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
     }
 
     .framestrip-toolbar {
@@ -944,13 +1032,21 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.12s ease;
+      transition: all 0.15s ease;
     }
 
     .btn-swap-colors:hover {
       background: #162438;
       border-color: #38bdf8;
       color: #38bdf8;
+    }
+
+    .btn-swap-colors.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+      transform: rotate(180deg) scale(1.15);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
     }
 
     .palette-hint-text {
@@ -1010,6 +1106,19 @@
       color: #ffffff;
       text-shadow: 0 1px 2px #000;
       pointer-events: none;
+      line-height: 1;
+    }
+
+    .palette-swatch.selected-primary .swatch-badge {
+      color: #38bdf8;
+    }
+
+    .palette-swatch.selected-secondary .swatch-badge {
+      color: #f43f5e;
+    }
+
+    .palette-swatch.selected-primary.selected-secondary .swatch-badge {
+      color: #d8b4fe;
     }
 
     .active-color-preview {
@@ -1162,7 +1271,32 @@
     .layer-actions {
       display: flex;
       align-items: center;
-      gap: 0.45rem;
+      gap: 0.35rem;
+    }
+
+    .btn-relative-toggle {
+      background: rgba(148, 163, 184, 0.12);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+      color: #94a3b8;
+      font-size: 0.66rem;
+      padding: 0.12rem 0.35rem;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      font-family: inherit;
+    }
+
+    .btn-relative-toggle:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: #38bdf8;
+      color: #fff;
+    }
+
+    .btn-relative-toggle.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.5);
+      color: #38bdf8;
+      font-weight: 600;
     }
 
     .btn-pivot-toggle {
@@ -1188,6 +1322,55 @@
       color: #fff;
       font-weight: 600;
       box-shadow: 0 0 8px rgba(228, 59, 68, 0.6);
+    }
+
+    /* Grouping & Pivot Dot in Timeline */
+    .btn-tool.btn-group-selection {
+      background: linear-gradient(135deg, #4f46e5, #6366f1);
+      border-color: #818cf8;
+      color: #ffffff;
+      box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+    }
+
+    .active-group-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.35);
+      border-radius: 5px;
+      padding: 0.15rem 0.4rem;
+    }
+
+    .group-pill-name {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #c7d2fe;
+      margin-right: 0.15rem;
+    }
+
+    .btn-tool.btn-group-pivot.active {
+      background: #e43b44;
+      border-color: #ff6b6b;
+      color: #ffffff;
+    }
+
+    .frame-cell.in-group {
+      border-color: #6366f1;
+      background: rgba(99, 102, 241, 0.12);
+    }
+
+    .cell-pivot-dot {
+      position: absolute;
+      bottom: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #e43b44;
+      box-shadow: 0 0 4px #ff4444;
+      pointer-events: none;
+      z-index: 2;
     }
 
     .inspector-props {

@@ -47,6 +47,7 @@ export interface LayerData {
     pivot?: { x: number; y: number };
   };
   pivot?: { x: number; y: number };
+  relative_to_parent?: boolean;
   groups?: LayerFrameGroup[];
   tracks?: {
     position?: Array<{ frame: number; value: [number, number]; easing?: string }>;
@@ -591,6 +592,67 @@ class ProjectService {
       this.updateJson();
       this.notify();
     }
+  }
+
+  /**
+   * Toggles whether a child layer's transform is relative to its parent layer.
+   */
+  public toggleLayerRelative(layerId: string): void {
+    const layer = this.state.layers.find((l) => l.id === layerId);
+    if (layer && layer.parent_id) {
+      layer.relative_to_parent = layer.relative_to_parent === false ? true : false;
+      this.updateJson();
+      this.notify();
+    }
+  }
+
+  /**
+   * Translates a layer by (deltaX, deltaY) pixels.
+   * Modifies the default_transform and any keyframes on the current frame.
+   */
+  public translateLayer(layerId: string, deltaX: number, deltaY: number, frameIndex?: number): void {
+    const layer = this.state.layers.find((l) => l.id === layerId);
+    if (!layer) return;
+
+    if (!layer.default_transform) {
+      layer.default_transform = {
+        x: Math.round(this.state.meta.canvas_width / 2) + deltaX,
+        y: Math.round(this.state.meta.canvas_height / 2) + deltaY,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+        opacity: 1,
+      };
+    } else {
+      layer.default_transform.x += deltaX;
+      layer.default_transform.y += deltaY;
+    }
+
+    if (!layer.tracks) layer.tracks = {};
+    if (!layer.tracks.position) layer.tracks.position = [];
+
+    if (layer.tracks.position.length > 0) {
+      if (typeof frameIndex === 'number') {
+        const kf = layer.tracks.position.find((k) => Math.round(k.frame) === Math.round(frameIndex));
+        if (kf) {
+          kf.value = [kf.value[0] + deltaX, kf.value[1] + deltaY];
+        } else {
+          layer.tracks.position.push({
+            frame: frameIndex,
+            value: [layer.default_transform.x, layer.default_transform.y],
+            easing: 'linear',
+          });
+          layer.tracks.position.sort((a, b) => a.frame - b.frame);
+        }
+      } else {
+        layer.tracks.position.forEach((k) => {
+          k.value = [k.value[0] + deltaX, k.value[1] + deltaY];
+        });
+      }
+    }
+
+    this.updateJson();
+    this.notify();
   }
 
   /**

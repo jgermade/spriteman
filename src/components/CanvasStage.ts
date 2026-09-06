@@ -24,6 +24,7 @@ export interface CanvasStageOptions {
   onPaintPixel?: (x: number, y: number, color: string) => void;
   onPaintStroke?: (pixels: Array<{ x: number; y: number }>, color: string) => void;
   onSetPivot?: (x: number, y: number) => void;
+  onTranslateLayer?: (deltaX: number, deltaY: number) => void;
 }
 
 export class CanvasStage {
@@ -48,12 +49,15 @@ export class CanvasStage {
   // Modal interaction keys:
   // SHIFT = Grab Mode
   // CTRL = Zoom Mode
-  // CMD (Meta) / ALT = Secondary Color Mode (Left Click acts as Right Click)
+  // SHIFT+CTRL = Layer Translation Mode
+  // CMD (Meta) / ALT = Secondary Color Mode
   private isShiftHeld: boolean = false;
   private isCtrlHeld: boolean = false;
   private isCmdHeld: boolean = false;
   private isAltHeld: boolean = false;
   private isMouseDown: boolean = false;
+  private isMovingLayer: boolean = false;
+  private layerMoveStart: { x: number; y: number } = { x: 0, y: 0 };
 
   // Painting interaction state
   private isPainting: boolean = false;
@@ -86,6 +90,7 @@ export class CanvasStage {
   private onPaintPixel?: (x: number, y: number, color: string) => void;
   private onPaintStroke?: (pixels: Array<{ x: number; y: number }>, color: string) => void;
   private onSetPivot?: (x: number, y: number) => void;
+  private onTranslateLayer?: (deltaX: number, deltaY: number) => void;
 
   // Layer pivot point (rotation axis)
   private pivot: { x: number; y: number } | null = null;
@@ -101,6 +106,7 @@ export class CanvasStage {
     this.onPaintPixel = options.onPaintPixel;
     this.onPaintStroke = options.onPaintStroke;
     this.onSetPivot = options.onSetPivot;
+    this.onTranslateLayer = options.onTranslateLayer;
 
     this.container = document.createElement('div');
     this.container.className = 'canvas-stage-root';
@@ -229,7 +235,9 @@ export class CanvasStage {
   }
 
   private updateCursor(): void {
-    if (this.isShiftHeld || this.isMousePanning) {
+    if ((this.isShiftHeld && this.isCtrlHeld) || this.isMovingLayer) {
+      this.canvas.style.cursor = 'move';
+    } else if (this.isShiftHeld || this.isMousePanning) {
       this.canvas.style.cursor = this.isMouseDown ? 'grabbing' : 'grab';
     } else if (this.isCtrlHeld || this.isCtrlZooming) {
       this.canvas.style.cursor = this.isAltHeld ? 'zoom-out' : 'zoom-in';
@@ -273,10 +281,12 @@ export class CanvasStage {
     const hint = this.hudElement.querySelector('.hud-hint');
     if (hint) {
       hint.textContent = this.isSettingPivot
-        ? '📍 Clic en el canvas para posicionar el eje de giro (pivote) • Clic en Pivote para salir'
-        : (this.isCmdHeld || this.isAltHeld)
-          ? '🎯 Modo Color 2 (Clic Secundario activo por CMD/ALT)'
-          : 'Clic Izq: Color 1 • CMD/ALT o Clic Der: Color 2 • SHIFT: Agarre • CTRL: Zoom';
+        ? '📍 Clic en el canvas para posicionar el eje de giro (pivote) del grupo'
+        : (this.isShiftHeld && this.isCtrlHeld)
+          ? '✥ Modo Desplazar Capa (Arrastra para mover la posición de la capa)'
+          : (this.isCmdHeld || this.isAltHeld)
+            ? '🎯 Intercambio Temporal de Color activo (CMD/ALT)'
+            : 'Clic Izq: Color I • CMD/ALT: Intercambio Temp • SHIFT: Agarre • CTRL: Zoom • SHIFT+CTRL: Mover Capa';
     }
   }
 
@@ -468,13 +478,23 @@ export class CanvasStage {
       { passive: false }
     );
 
-    // 4. Mouse Down: Grab, Zoom, or Paint
+    // 4. Mouse Down: Grab, Zoom, Layer Move, or Paint
     this.container.addEventListener('mousedown', (e: MouseEvent) => {
       this.isMouseDown = true;
       this.isShiftHeld = e.shiftKey;
       this.isCtrlHeld = e.ctrlKey;
       this.isCmdHeld = e.metaKey;
       this.isAltHeld = e.altKey;
+
+      // Mode 0: SHIFT + CTRL = Desplazar la Capa (Layer Move Mode)
+      if ((this.isShiftHeld && this.isCtrlHeld) || (e.shiftKey && e.ctrlKey)) {
+        e.preventDefault();
+        this.isMovingLayer = true;
+        const px = this.getSpritePixelAtPointer(e.clientX, e.clientY);
+        this.layerMoveStart = px || { x: 0, y: 0 };
+        this.updateCursor();
+        return;
+      }
 
       // Mode A: SHIFT Grab / Pan Mode or Middle Mouse
       if (this.isShiftHeld || e.button === 1) {
@@ -535,6 +555,20 @@ export class CanvasStage {
       this.isCtrlHeld = e.ctrlKey;
       this.isCmdHeld = e.metaKey;
       this.isAltHeld = e.altKey;
+
+      // Handle Layer Move Drag (SHIFT + CTRL)
+      if (this.isMovingLayer) {
+        const px = this.getSpritePixelAtPointer(e.clientX, e.clientY);
+        if (px) {
+          const dx = px.x - this.layerMoveStart.x;
+          const dy = px.y - this.layerMoveStart.y;
+          if (dx !== 0 || dy !== 0) {
+            this.layerMoveStart = px;
+            this.onTranslateLayer?.(dx, dy);
+          }
+        }
+        return;
+      }
 
       // Handle Grab / Pan Mode Drag
       if (this.isMousePanning) {
@@ -599,6 +633,7 @@ export class CanvasStage {
     });
 
     this.container.addEventListener('mouseleave', () => {
+      this.isMovingLayer = false;
       if (this.hoverPixel) {
         this.hoverPixel = null;
         this.redraw();
@@ -607,6 +642,7 @@ export class CanvasStage {
 
     window.addEventListener('mouseup', (e: MouseEvent) => {
       this.isMouseDown = false;
+      this.isMovingLayer = false;
 
       if (this.isMousePanning) {
         this.isMousePanning = false;

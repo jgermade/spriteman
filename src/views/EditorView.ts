@@ -66,6 +66,16 @@ export class EditorView {
           this.saveCurrentProject();
         }
       },
+      onTranslateLayer: (deltaX, deltaY) => {
+        const proj = projectService.getState();
+        const selectedId = proj.selectedLayerId;
+        const currentInt = Math.round(animationService.getState().currentFrame);
+        if (selectedId) {
+          projectService.translateLayer(selectedId, deltaX, deltaY, currentInt);
+          animationService.reloadProject(projectService.getRawJson());
+          this.saveCurrentProject();
+        }
+      },
     });
 
     this.frameStrip = new FrameStrip({
@@ -236,12 +246,19 @@ export class EditorView {
     this.hierarchyTree = new HierarchyTree({
       onSelectLayer: (layerId) => {
         projectService.selectLayer(layerId);
+        const currentInt = Math.round(animationService.getState().currentFrame);
         const layer = projectService.getState().layers.find((l) => l.id === layerId);
-        const pivot = layer?.pivot ?? layer?.default_transform?.pivot ?? null;
+        const group = projectService.getActiveLayerGroupForFrame(currentInt);
+        const pivot = group?.pivot ?? layer?.pivot ?? layer?.default_transform?.pivot ?? null;
         this.canvasStage.setPivot(pivot);
       },
       onAddLayer: () => {
         projectService.addLayer();
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onToggleLayerRelative: (layerId) => {
+        projectService.toggleLayerRelative(layerId);
         animationService.reloadProject(projectService.getRawJson());
         this.saveCurrentProject();
       },
@@ -497,23 +514,32 @@ export class EditorView {
     // 2. Animation service updates
     animationService.subscribe((animState: AnimationState) => {
       const proj = projectService.getState();
+      const currentInt = Math.round(animState.currentFrame);
+      const activeLayer = proj.layers.find((l) => l.id === proj.selectedLayerId);
+      const layerGroups = activeLayer?.groups || [];
+      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+      const isPivot = this.canvasStage.isPivotMode();
+
       this.frameStrip.update(
         animState.currentFrame,
         animState.totalFrames,
         animState.isPlaying,
         proj.frame_pixels,
         proj.meta.canvas_width,
-        proj.meta.canvas_height
+        proj.meta.canvas_height,
+        proj.animations,
+        proj.activeAnimationId,
+        layerGroups,
+        activeGroup,
+        isPivot
       );
 
-      const currentInt = Math.round(animState.currentFrame);
       const currentPixels = projectService.getFramePixels(currentInt);
       const prevInt = Math.max(0, currentInt - 1);
       const onionPixels = animState.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
       this.canvasStage.setFramePixels(currentPixels, onionPixels);
 
-      const activeLayer = proj.layers.find((l) => l.id === proj.selectedLayerId);
-      const pivot = activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
+      const pivot = activeGroup?.pivot ?? activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
       this.canvasStage.setPivot(pivot);
 
       if (animState.resolvedFrame) {
@@ -531,8 +557,12 @@ export class EditorView {
       const isPivot = this.canvasStage.isPivotMode();
       this.hierarchyTree.update(projState.layers, projState.selectedLayerId, isPivot);
 
+      const anim = animationService.getState();
+      const currentInt = Math.round(anim.currentFrame);
       const activeLayer = projState.layers.find((l) => l.id === projState.selectedLayerId);
-      const pivot = activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
+      const layerGroups = activeLayer?.groups || [];
+      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+      const pivot = activeGroup?.pivot ?? activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
       this.canvasStage.setPivot(pivot);
 
       const sizeBadge = this.root.querySelector('#topbar-size-badge');
@@ -553,8 +583,6 @@ export class EditorView {
         this.currentZoom
       );
 
-      const anim = animationService.getState();
-      const currentInt = Math.round(anim.currentFrame);
       const currentPixels = projState.frame_pixels[currentInt] || {};
       const prevInt = Math.max(0, currentInt - 1);
       const onionPixels = anim.onionSkinEnabled && currentInt > 0 ? (projState.frame_pixels[prevInt] || {}) : null;
@@ -566,7 +594,12 @@ export class EditorView {
         anim.isPlaying,
         projState.frame_pixels,
         projState.meta.canvas_width,
-        projState.meta.canvas_height
+        projState.meta.canvas_height,
+        projState.animations,
+        projState.activeAnimationId,
+        layerGroups,
+        activeGroup,
+        isPivot
       );
 
       if (anim.resolvedFrame) {

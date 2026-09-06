@@ -201,6 +201,8 @@ pub struct Layer {
     pub default_frame: Option<String>,
     #[serde(default)]
     pub default_transform: Transform2D,
+    #[serde(default = "default_true")]
+    pub relative_to_parent: bool,
     #[serde(default)]
     pub tracks: LayerTracks,
 }
@@ -304,6 +306,7 @@ mod tests {
                 sheet_id: Some("hero".to_string()),
                 default_frame: Some("idle_0".to_string()),
                 default_transform: Transform2D::default(),
+                relative_to_parent: true,
                 tracks: LayerTracks {
                     position: vec![
                         Keyframe::new(0.0, [32.0, 32.0], Easing::Linear),
