@@ -1,0 +1,112 @@
+<script :setup="{
+  primaryColor,
+  secondaryColor,
+  isTempSwapped,
+  palette,
+  onSelectPrimary,
+  onSelectSecondary,
+  onSelectColors,
+  onSwapColors
+}" type="text/typescript">
+  let curPrimary = primaryColor || '#000000';
+  let curSecondary = secondaryColor || '#ffffff';
+
+  $: curPrimary = primaryColor || '#000000';
+  $: curSecondary = secondaryColor || '#ffffff';
+  $: colorList = palette || [];
+
+  const isEraserPrimary = () => curPrimary === '__eraser__';
+  const isEraserSecondary = () => curSecondary === '__eraser__';
+
+  const isPrimary = (c: string) => c.toLowerCase() === curPrimary.toLowerCase();
+  const isSecondary = (c: string) => c.toLowerCase() === curSecondary.toLowerCase();
+
+  const getColorPreviewStyle = (color: string) => {
+    if (color === '__eraser__') {
+      return 'background: linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%); background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; background-color: #fff;';
+    }
+    return `background-color: ${color};`;
+  };
+
+  const handleClick = (e: MouseEvent, color: string) => {
+    if (e.shiftKey) {
+      curSecondary = color;
+      secondaryColor = color;
+      onSelectSecondary?.(color);
+    } else {
+      curPrimary = color;
+      primaryColor = color;
+      onSelectPrimary?.(color);
+    }
+  };
+
+  const handleContextMenu = (e: MouseEvent, color: string) => {
+    e.preventDefault();
+    curSecondary = color;
+    secondaryColor = color;
+    onSelectSecondary?.(color);
+  };
+</script>
+
+<div class="palette-panel">
+  <div class="panel-header palette-header-dual">
+    <span class="panel-title">Palette</span>
+    <div class="dual-color-slots">
+      <div class="color-slot-display" title="Color I (Izquierdo): Clic en cualquier muestra">
+        <span class="slot-tag">I</span>
+        <span class="slot-color-preview" :style="getColorPreviewStyle(curPrimary)"></span>
+      </div>
+      <button
+        class="btn-swap-colors"
+        :class="{ active: isTempSwapped }"
+        title="Intercambiar colores [X] (o mantener CMD/ALT)"
+        @click="onSwapColors?.()"
+      >⇄</button>
+      <div class="color-slot-display" title="Color D (Derecho): Clic Derecho en cualquier muestra">
+        <span class="slot-tag">D</span>
+        <span class="slot-color-preview" :style="getColorPreviewStyle(curSecondary)"></span>
+      </div>
+    </div>
+  </div>
+  <div class="palette-swatches">
+    <!-- Eraser swatch -->
+    <button
+      class="palette-swatch eraser"
+      :class="{
+        'selected-primary': isEraserPrimary(),
+        'selected-secondary': isEraserSecondary()
+      }"
+      title="Borrador — Borra píxeles&#10;• Clic Izq: Color I&#10;• Clic Der: Color D"
+      @click="handleClick($event, '__eraser__')"
+      @contextmenu="handleContextMenu($event, '__eraser__')"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.6 1.6c.8-.8 2-.8 2.8 0L21 5.2c.8.8.8 2 0 2.8L11 18"></path>
+        <line x1="18" y1="13" x2="11" y2="20"></line>
+      </svg>
+      <span :if="isEraserPrimary() && isEraserSecondary()" class="swatch-badge dual">I|D</span>
+      <span :elseif="isEraserPrimary()" class="swatch-badge primary">I</span>
+      <span :elseif="isEraserSecondary()" class="swatch-badge secondary">D</span>
+    </button>
+
+    <!-- Colors -->
+    <button
+      :each="color in colorList"
+      :key="color"
+      class="palette-swatch"
+      :class="{
+        'selected-primary': isPrimary(color),
+        'selected-secondary': isSecondary(color)
+      }"
+      :style="`background-color: ${color};`"
+      :title="`${color}&#10;• Clic Izq: Color I (Izq)&#10;• Clic Der: Color D (Der)`"
+      @click="handleClick($event, color)"
+      @contextmenu="handleContextMenu($event, color)"
+    >
+      <span :if="isPrimary(color) && isSecondary(color)" class="swatch-badge dual">I|D</span>
+      <span :elseif="isPrimary(color)" class="swatch-badge primary">I</span>
+      <span :elseif="isSecondary(color)" class="swatch-badge secondary">D</span>
+    </button>
+  </div>
+  <div class="palette-hint-text">Clic Izq: Color I • Clic Der: Color D • CMD/ALT: Intercambio Temp • [X]: Intercambiar</div>
+</div>

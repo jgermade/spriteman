@@ -1,6 +1,8 @@
 /**
  * Progressive Web App (PWA) registration and lifecycle service.
+ * Powered by jq79 $reactive store.
  */
+import { $reactive, ReactiveDeepData } from 'jq79';
 
 export interface PwaState {
   isInstallable: boolean;
@@ -12,15 +14,20 @@ type PwaListener = (state: PwaState) => void;
 
 class PwaService {
   private deferredPrompt: any = null;
-  private state: PwaState = {
-    isInstallable: false,
-    isOffline: !navigator.onLine,
-    isInstalled: window.matchMedia('(display-mode: standalone)').matches,
-  };
+  public readonly state: ReactiveDeepData<PwaState>;
   private listeners: Set<PwaListener> = new Set();
 
   constructor() {
+    this.state = $reactive<PwaState>({
+      isInstallable: false,
+      isOffline: !navigator.onLine,
+      isInstalled: window.matchMedia('(display-mode: standalone)').matches,
+    });
     this.initListeners();
+
+    this.state.$onAny(() => {
+      this.notify();
+    });
   }
 
   private initListeners(): void {
@@ -28,24 +35,20 @@ class PwaService {
       e.preventDefault();
       this.deferredPrompt = e;
       this.state.isInstallable = true;
-      this.notify();
     });
 
     window.addEventListener('appinstalled', () => {
       this.deferredPrompt = null;
       this.state.isInstallable = false;
       this.state.isInstalled = true;
-      this.notify();
     });
 
     window.addEventListener('online', () => {
       this.state.isOffline = false;
-      this.notify();
     });
 
     window.addEventListener('offline', () => {
       this.state.isOffline = true;
-      this.notify();
     });
   }
 
@@ -66,7 +69,6 @@ class PwaService {
     const { outcome } = await this.deferredPrompt.userChoice;
     this.deferredPrompt = null;
     this.state.isInstallable = false;
-    this.notify();
     return outcome === 'accepted';
   }
 
@@ -84,7 +86,7 @@ class PwaService {
 
   private notify(): void {
     const s = this.getState();
-    this.listeners.forEach(l => l(s));
+    this.listeners.forEach((l) => l(s));
   }
 }
 

@@ -1,6 +1,8 @@
 /**
  * Animation playback and WASM evaluation service.
+ * Powered by jq79 $reactive store.
  */
+import { $reactive, ReactiveDeepData } from 'jq79';
 import { ensureWasmInitialized, SpritemotionWasm, ResolvedFrame } from '../wasm/index';
 
 export interface AnimationState {
@@ -18,19 +20,27 @@ type Listener = (state: AnimationState) => void;
 
 class AnimationService {
   private engine: SpritemotionWasm | null = null;
-  private state: AnimationState = {
-    currentFrame: 0,
-    isPlaying: false,
-    fps: 12,
-    speedMultiplier: 1.0,
-    totalFrames: 4,
-    resolvedFrame: null,
-    onionSkinFrame: null,
-    onionSkinEnabled: true,
-  };
+  public readonly state: ReactiveDeepData<AnimationState>;
   private listeners: Set<Listener> = new Set();
   private animFrameId: number | null = null;
   private lastTimestamp: number = 0;
+
+  constructor() {
+    this.state = $reactive<AnimationState>({
+      currentFrame: 0,
+      isPlaying: false,
+      fps: 12,
+      speedMultiplier: 1.0,
+      totalFrames: 4,
+      resolvedFrame: null,
+      onionSkinFrame: null,
+      onionSkinEnabled: true,
+    });
+
+    this.state.$onAny(() => {
+      this.notify();
+    });
+  }
 
   public async init(projectJson: string): Promise<void> {
     await ensureWasmInitialized();
@@ -70,18 +80,15 @@ class AnimationService {
 
   public setFps(fps: number): void {
     this.state.fps = fps;
-    this.notify();
   }
 
   public setSpeedMultiplier(mult: number): void {
     this.state.speedMultiplier = mult;
-    this.notify();
   }
 
   public setOnionSkinEnabled(enabled: boolean): void {
     this.state.onionSkinEnabled = enabled;
     this.updateFrames();
-    this.notify();
   }
 
   public seek(frame: number): void {
@@ -89,7 +96,6 @@ class AnimationService {
     const maxFrame = Math.max(0, this.state.totalFrames - 0.01);
     this.state.currentFrame = Math.max(0, Math.min(frame, maxFrame));
     this.updateFrames();
-    this.notify();
   }
 
   private updateFrames(): void {
@@ -114,7 +120,6 @@ class AnimationService {
     this.state.isPlaying = true;
     this.lastTimestamp = performance.now();
     this.loop(this.lastTimestamp);
-    this.notify();
   }
 
   public pause(): void {
@@ -123,7 +128,6 @@ class AnimationService {
       cancelAnimationFrame(this.animFrameId);
       this.animFrameId = null;
     }
-    this.notify();
   }
 
   public togglePlay(): void {

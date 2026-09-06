@@ -1,0 +1,158 @@
+<script :setup="{
+  savedFiles,
+  sizes,
+  onCreateProject,
+  onOpenProject,
+  onOpenSample,
+  onImportJson
+}" type="text/typescript">
+  let projectName = 'sprite_character_1';
+  let canvasSize = '64x64';
+  let fps = '12';
+
+  $: standardSizes = sizes || [];
+
+  const handleCreate = () => {
+    const name = projectName.trim() || 'pixel_sprite';
+    const [w, h] = canvasSize.split('x').map(Number);
+    const speed = parseInt(fps, 10) || 12;
+    onCreateProject?.(name, w, h, speed);
+  };
+
+  const handleOpen = (fn: string) => {
+    onOpenProject?.(fn);
+  };
+
+  const handleSample = () => {
+    onOpenSample?.();
+  };
+
+  const handleFileInput = (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        onImportJson?.(reader.result as string);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const formatDate = (timestamp: number) => {
+    return new Date(timestamp).toLocaleDateString();
+  };
+</script>
+
+<div class="welcome-screen-view">
+  <div class="welcome-container">
+    <!-- Hero Header -->
+    <div class="welcome-hero">
+      <div class="welcome-hero-avatar">
+        <img src="./icon-192.svg" class="welcome-hero-img" alt="SpriteMotion Icon" width="88" height="88" />
+      </div>
+      <h1 class="welcome-title">Spritemotion</h1>
+      <p class="welcome-subtitle">
+        Pixel art animated sprite editor with skeletal hierarchy &amp; WebAssembly engine
+      </p>
+    </div>
+
+    <!-- Main Cards Grid -->
+    <div class="welcome-cards-grid">
+      <!-- Card 1: Create New Project -->
+      <div class="welcome-card">
+        <div class="card-header">
+          <h2 class="card-heading">📄 Create New Project</h2>
+          <span class="card-hint">Starts with 1 frame</span>
+        </div>
+
+        <div class="welcome-form">
+          <div class="welcome-field">
+            <label class="welcome-label">Project Name:</label>
+            <input
+              id="welcome-input-name"
+              type="text"
+              class="welcome-input"
+              :value="projectName"
+              @input="projectName = $event.target.value"
+              placeholder="e.g. hero_run"
+            />
+          </div>
+
+          <div class="welcome-field">
+            <label class="welcome-label">Canvas Dimensions (px):</label>
+            <select
+              id="welcome-select-size"
+              class="welcome-select"
+              :value="canvasSize"
+              @change="canvasSize = $event.target.value"
+            >
+              <option
+                :each="p in standardSizes"
+                :key="p.label"
+                :value="`${p.width}x${p.height}`"
+              >{{ p.label }}</option>
+            </select>
+          </div>
+
+          <div class="welcome-field">
+            <label class="welcome-label">Animation Speed (FPS):</label>
+            <select
+              id="welcome-select-fps"
+              class="welcome-select"
+              :value="fps"
+              @change="fps = $event.target.value"
+            >
+              <option value="6">6 FPS (Retro slow)</option>
+              <option value="8">8 FPS (Classic walk)</option>
+              <option value="12">12 FPS (Standard pixel art)</option>
+              <option value="16">16 FPS (Smooth retro)</option>
+              <option value="24">24 FPS (Cinematic)</option>
+            </select>
+          </div>
+
+          <button id="welcome-btn-create" class="welcome-btn-primary" @click="handleCreate">
+            ✨ Create Project (1 Frame)
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 2: Open Existing Project -->
+      <div class="welcome-card">
+        <div class="card-header">
+          <h2 class="card-heading">📁 Open Saved Project</h2>
+          <span class="card-hint">WASMFS Storage</span>
+        </div>
+
+        <div class="welcome-saved-list">
+          <div :if="!savedFiles || savedFiles.length === 0" class="welcome-empty">
+            No projects saved in WASMFS yet.
+          </div>
+          <div :else class="welcome-file-items">
+            <div
+              :each="f in savedFiles"
+              :key="f.name"
+              class="welcome-file-item"
+            >
+              <div class="welcome-file-info">
+                <span class="welcome-file-name">📄 {{ f.name }}</span>
+                <span class="welcome-file-date">{{ formatDate(f.updatedAt) }}</span>
+              </div>
+              <button class="welcome-btn-open" @click="handleOpen(f.name)">Open</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="welcome-extra-actions">
+          <button id="welcome-btn-sample" class="welcome-btn-secondary" @click="handleSample">
+            🌟 Open Sample Walk Project
+          </button>
+
+          <label class="welcome-btn-secondary upload-btn">
+            📥 Import JSON File
+            <input id="welcome-input-file" type="file" accept=".json" style="display: none;" @change="handleFileInput" />
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

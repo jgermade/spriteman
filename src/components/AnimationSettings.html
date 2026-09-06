@@ -1,0 +1,71 @@
+<script :setup="{
+  width,
+  height,
+  fps,
+  zoom,
+  sizes,
+  onChangeCanvasSize,
+  onChangeFps,
+  onChangeZoom
+}" type="text/typescript">
+  $: standardSizes = sizes || [];
+  $: currentSizeValue = `${width || 64}x${height || 64}`;
+
+  const handleSizeChange = (e: Event) => {
+    const val = (e.target as HTMLSelectElement).value;
+    const [w, h] = val.split('x').map(Number);
+    onChangeCanvasSize?.(w, h);
+  };
+
+  const handleFpsChange = (e: Event) => {
+    const val = parseInt((e.target as HTMLSelectElement).value, 10);
+    onChangeFps?.(val);
+  };
+
+  const handleZoomChange = (e: Event) => {
+    const val = parseInt((e.target as HTMLSelectElement).value, 10);
+    onChangeZoom?.(val);
+  };
+</script>
+
+<div class="settings-panel">
+  <div class="panel-header">
+    <span class="panel-title">Sprite &amp; Speed Settings</span>
+  </div>
+  <div class="settings-grid">
+    <!-- Canvas Pixel Size -->
+    <div class="setting-item">
+      <label class="setting-label">Canvas Size (px):</label>
+      <select class="setting-select size-select" :value="currentSizeValue" @change="handleSizeChange">
+        <option :each="p in standardSizes" :key="p.label" :value="`${p.width}x${p.height}`">{{ p.label }}</option>
+      </select>
+    </div>
+
+    <!-- FPS Speed -->
+    <div class="setting-item">
+      <label class="setting-label">Animation Speed (FPS):</label>
+      <div class="fps-control-group">
+        <select class="setting-select fps-select" :value="String(fps || 12)" @change="handleFpsChange">
+          <option value="6">6 FPS (Retro slow)</option>
+          <option value="8">8 FPS (Classic walk)</option>
+          <option value="12">12 FPS (Standard anime/game)</option>
+          <option value="16">16 FPS (Smooth retro)</option>
+          <option value="24">24 FPS (Cinematic)</option>
+          <option value="30">30 FPS (Fluid)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Pixel Zoom -->
+    <div class="setting-item">
+      <label class="setting-label">Pixel Zoom:</label>
+      <select class="setting-select zoom-select" :value="String(zoom || 6)" @change="handleZoomChange">
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="6">6x</option>
+        <option value="8">8x</option>
+        <option value="12">12x</option>
+      </select>
+    </div>
+  </div>
+</div>

@@ -1,7 +1,9 @@
 /**
  * Tab and URL Hash routing service.
  * Manages open project tabs using the format: #tabs=<id>,#<active_id>,<id2>
+ * Powered by jq79 $reactive store.
  */
+import { $reactive, ReactiveDeepData } from 'jq79';
 
 export interface TabsState {
   tabs: string[];
@@ -51,22 +53,26 @@ export function formatTabsHash(tabs: string[], activeTab: string | null): string
 }
 
 class TabsService {
-  private state: TabsState = {
-    tabs: [],
-    activeTab: null,
-  };
+  public readonly state: ReactiveDeepData<TabsState>;
   private listeners: Set<TabsListener> = new Set();
   private isUpdatingHash = false;
 
   constructor() {
-    this.state = parseTabsHash(window.location.hash);
+    const initial = parseTabsHash(window.location.hash);
+    this.state = $reactive<TabsState>({
+      tabs: initial.tabs,
+      activeTab: initial.activeTab,
+    });
 
     window.addEventListener('hashchange', () => {
       if (this.isUpdatingHash) return;
       const parsed = parseTabsHash(window.location.hash);
-      this.state = parsed;
+      this.state.tabs = parsed.tabs;
+      this.state.activeTab = parsed.activeTab;
       this.notify();
     });
+
+
   }
 
   public getState(): TabsState {

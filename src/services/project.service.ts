@@ -1,3 +1,4 @@
+import { $reactive, ReactiveDeepData } from 'jq79';
 /**
  * Project document state management service.
  */
@@ -71,30 +72,36 @@ export interface ProjectState {
 type ProjectListener = (state: ProjectState) => void;
 
 class ProjectService {
-  private state: ProjectState = {
-    meta: {
-      name: 'pixel_sprite_anim',
-      fps: 12,
-      total_frames: 4,
-      canvas_width: 64,
-      canvas_height: 64,
-    },
-    layers: [],
-    selectedLayerId: null,
-    frame_pixels: {},
-    animations: [
-      {
-        id: 'anim_idle',
-        name: 'idle',
+  public readonly state: ReactiveDeepData<ProjectState>;
+
+  constructor() {
+    this.state = $reactive<ProjectState>({
+      meta: {
+        name: 'pixel_sprite_anim',
         fps: 12,
         total_frames: 4,
-        frame_pixels: {},
-        layer_groups: {},
+        canvas_width: 64,
+        canvas_height: 64,
       },
-    ],
-    activeAnimationId: 'anim_idle',
-    rawJson: '',
-  };
+      layers: [],
+      selectedLayerId: null,
+      frame_pixels: {},
+      animations: [
+        {
+          id: 'anim_idle',
+          name: 'idle',
+          fps: 12,
+          total_frames: 4,
+          frame_pixels: {},
+          layer_groups: {},
+        },
+      ],
+      activeAnimationId: 'anim_idle',
+      rawJson: '',
+    });
+
+
+  }
   private listeners: Set<ProjectListener> = new Set();
   private undoStack: string[] = [];
   private redoStack: string[] = [];

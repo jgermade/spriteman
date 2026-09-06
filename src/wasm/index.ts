@@ -25,7 +25,7 @@ let wasmInitPromise: Promise<void> | null = null;
 
 export async function ensureWasmInitialized(): Promise<void> {
   if (!wasmInitPromise) {
-    wasmInitPromise = initWasm(wasmUrl).then(() => undefined);
+    wasmInitPromise = initWasm({ module_or_path: wasmUrl }).then(() => undefined);
   }
   return wasmInitPromise;
 }

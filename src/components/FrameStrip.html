@@ -1,0 +1,520 @@
+<script :setup="{
+  currentFrame,
+  totalFrames,
+  isPlaying,
+  onionSkin,
+  spriteWidth,
+  spriteHeight,
+  framePixels,
+  animations,
+  activeAnimationId,
+  layerGroups,
+  activeGroup,
+  isPivotMode,
+  canUndo,
+  canRedo,
+  onSelectFrame,
+  onSelectRange,
+  onAddFrame,
+  onReorderFrame,
+  onDuplicateFrame,
+  onDeleteFrame,
+  onTogglePlay,
+  onToggleOnionSkin,
+  onStep,
+  onGroupFrames,
+  onUngroupFrames,
+  onToggleGroupPivotMode,
+  onUndo,
+  onRedo,
+  onSelectAnimation,
+  onAddAnimation,
+  onRenameAnimation,
+  onDeleteAnimation
+}" type="text/typescript">
+  let selectedRange: { start: number; end: number } | null = null;
+  let lastClickedFrame = 0;
+  let draggingIndex: number | null = null;
+  let isDraggingNew = false;
+  let insertSlotIndex: number | null = null;
+
+  // Thumbnail canvas & memoization
+  let thumbCanvas: HTMLCanvasElement | null = null;
+  const thumbCache = new Map<string, string>();
+
+  const getThumbnail = (i: number, pixelsMap: any, w: number, h: number): string => {
+    const pixels = (pixelsMap && pixelsMap[i]) || {};
+    const keys = Object.keys(pixels);
+    const key = `${i}_${w || 64}x${h || 64}_${keys.length}_${keys[0] ? pixels[keys[0]] : ''}`;
+    if (thumbCache.has(key)) return thumbCache.get(key)!;
+
+    if (!thumbCanvas) {
+      thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 44;
+      thumbCanvas.height = 44;
+    }
+    const ctx = thumbCanvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.clearRect(0, 0, 44, 44);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, 44, 44);
+
+    const targetW = Math.max(1, w || 64);
+    const targetH = Math.max(1, h || 64);
+    const scaleX = 44 / targetW;
+    const scaleY = 44 / targetH;
+    ctx.imageSmoothingEnabled = false;
+
+    for (let k = 0; k < keys.length; k++) {
+      const coord = keys[k];
+      const comma = coord.indexOf(',');
+      if (comma === -1) continue;
+      const x = parseInt(coord.slice(0, comma), 10);
+      const y = parseInt(coord.slice(comma + 1), 10);
+      ctx.fillStyle = pixels[coord];
+      ctx.fillRect(Math.floor(x * scaleX), Math.floor(y * scaleY), Math.ceil(scaleX), Math.ceil(scaleY));
+    }
+
+    const dataUrl = thumbCanvas.toDataURL();
+    if (thumbCache.size > 250) thumbCache.clear();
+    thumbCache.set(key, dataUrl);
+    return dataUrl;
+  };
+
+  $: activeInt = Math.round(currentFrame || 0);
+  $: maxFrames = Math.max(1, totalFrames || 1);
+  $: animList = animations || [];
+  $: currentGroupList = layerGroups || [];
+  $: hasRangeSelection = !!selectedRange && selectedRange.end > selectedRange.start;
+  $: rangeStart = selectedRange ? selectedRange.start : 0;
+  $: rangeEnd = selectedRange ? selectedRange.end : 0;
+  $: frameIndicatorText = `Frame: ${activeInt + 1} / ${maxFrames}`;
+
+  const getAnimIcon = (name: string): string => {
+    const lower = (name || '').toLowerCase();
+    if (lower.includes('walk')) return '🚶';
+    if (lower.includes('run')) return '🏃';
+    if (lower.includes('jump')) return '🦘';
+    if (lower.includes('attack') || lower.includes('slash')) return '⚔️';
+    if (lower.includes('hurt') || lower.includes('die')) return '💥';
+    return '🧍';
+  };
+
+  const handleSelectAnim = (id: string) => {
+    onSelectAnimation?.(id);
+  };
+
+  const handleRenameAnim = (a: any) => {
+    const newName = prompt('Renombrar animación:', a.name || '');
+    if (newName && newName.trim() && a.id) {
+      onRenameAnimation?.(a.id, newName.trim());
+    }
+  };
+
+  const handleToggleOnion = () => {
+    onToggleOnionSkin?.(!onionSkin);
+  };
+
+  const handleGroupSelection = () => {
+    if (selectedRange) {
+      const s = selectedRange.start;
+      const e = selectedRange.end;
+      selectedRange = null;
+      onGroupFrames?.(s, e);
+    }
+  };
+
+  // Build reactive reel items
+  const buildCellData = (i: number, cellGroup: any, isIntermediate: boolean) => {
+    const isActive = i === activeInt;
+    const isInRange = hasRangeSelection && i >= rangeStart && i <= rangeEnd;
+    const inGroup = !!cellGroup;
+    const isGroupStart = inGroup && i === cellGroup.start_frame;
+    const isGroupEnd = inGroup && i === cellGroup.end_frame;
+    const hasGroupPivot = inGroup && !!cellGroup.pivot;
+    const pivotCoords = hasGroupPivot ? `[${cellGroup.pivot.x}, ${cellGroup.pivot.y}]` : '';
+
+    return {
+      index: i,
+      isActive,
+      isInRange,
+      inGroup,
+      isGroupStart,
+      isGroupEnd,
+      isIntermediate,
+      hasGroupPivot,
+      pivotCoords,
+      thumb: getThumbnail(i, framePixels, spriteWidth, spriteHeight),
+      title: isIntermediate
+        ? `Fotograma ${i + 1} (Intermedio automático de ${cellGroup?.name || 'Grupo'}, no editable)`
+        : inGroup
+        ? `Frame ${i + 1} (${cellGroup?.name || 'Grupo'}${hasGroupPivot ? ` • Pivote: ${pivotCoords}` : ''})`
+        : `Frame ${i + 1} (Shift+Click to select range, Drag to reorder)`
+    };
+  };
+
+  $: reelItems = (() => {
+    const items: any[] = [];
+    const count = totalFrames || 1;
+    let idx = 0;
+    while (idx < count) {
+      const matchingGroup = currentGroupList.find(
+        (g: any) => idx > g.start_frame && idx < g.end_frame
+      );
+
+      if (matchingGroup && idx === matchingGroup.start_frame + 1) {
+        const intermediateCells: any[] = [];
+        while (idx < matchingGroup.end_frame && idx < count) {
+          intermediateCells.push(buildCellData(idx, matchingGroup, true));
+          idx++;
+        }
+        items.push({
+          type: 'group',
+          key: `grp_${matchingGroup.id}`,
+          group: matchingGroup,
+          isGroupActive: activeGroup?.id === matchingGroup.id,
+          cells: intermediateCells
+        });
+      } else {
+        const cellGroup = currentGroupList.find((g: any) => idx >= g.start_frame && idx <= g.end_frame);
+        items.push({
+          type: 'single',
+          key: `frm_${idx}`,
+          cell: buildCellData(idx, cellGroup, false)
+        });
+        idx++;
+      }
+    }
+    return items;
+  })();
+
+  const handleCellClick = (e: MouseEvent, i: number, isIntermediate: boolean) => {
+    if (draggingIndex !== null || isDraggingNew) return;
+
+    if (e.shiftKey && !isIntermediate) {
+      const start = Math.min(lastClickedFrame, i);
+      const end = Math.max(lastClickedFrame, i);
+      selectedRange = { start, end };
+      onSelectRange?.(start, end);
+      onSelectFrame?.(i);
+    } else {
+      selectedRange = null;
+      lastClickedFrame = i;
+      onSelectFrame?.(i);
+    }
+  };
+
+  // Drag and drop handlers
+  const handleCellDragStart = (e: DragEvent, i: number) => {
+    draggingIndex = i;
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('application/json', JSON.stringify({ type: 'reorder', fromIndex: i }));
+      e.dataTransfer.effectAllowed = 'move';
+    }
+  };
+
+  const handleNewDragStart = (e: DragEvent) => {
+    isDraggingNew = true;
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('application/json', JSON.stringify({ type: 'new' }));
+      e.dataTransfer.effectAllowed = 'copy';
+    }
+  };
+
+  const cleanupDrag = () => {
+    draggingIndex = null;
+    isDraggingNew = false;
+    insertSlotIndex = null;
+  };
+
+  const handleCellDragOver = (e: DragEvent, i: number) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = isDraggingNew ? 'copy' : 'move';
+    const target = e.currentTarget as HTMLElement;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const isRightHalf = e.clientX > rect.left + rect.width / 2;
+    insertSlotIndex = isRightHalf ? i + 1 : i;
+  };
+
+  const handleReelDragOver = (e: DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleReelDragLeave = (e: DragEvent) => {
+    const target = e.currentTarget as HTMLElement;
+    if (target && !target.contains(e.relatedTarget as Node)) {
+      insertSlotIndex = null;
+    }
+  };
+
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    const insertAt = insertSlotIndex;
+    let dragData: { type: string; fromIndex?: number } | null = null;
+    try {
+      const raw = e.dataTransfer?.getData('application/json');
+      if (raw) dragData = JSON.parse(raw);
+    } catch {
+      // ignore
+    }
+
+    const wasDraggingIdx = draggingIndex;
+    const wasDraggingNew = isDraggingNew;
+    cleanupDrag();
+
+    if (dragData?.type === 'reorder' || typeof wasDraggingIdx === 'number') {
+      const from = dragData?.fromIndex ?? wasDraggingIdx!;
+      let to = typeof insertAt === 'number' ? insertAt : (totalFrames || 1) - 1;
+      if (from < to) {
+        to = to - 1;
+      }
+      to = Math.max(0, Math.min((totalFrames || 1) - 1, to));
+      if (from !== to) {
+        onReorderFrame?.(from, to);
+      }
+    } else if (dragData?.type === 'new' || wasDraggingNew) {
+      if (typeof insertAt === 'number') {
+        onAddFrame?.(insertAt);
+      } else {
+        onAddFrame?.();
+      }
+    }
+  };
+</script>
+
+<div class="framestrip-container">
+  <!-- Animation tabs strip -->
+  <div class="animation-tabs-strip">
+    <div class="anim-tabs-list">
+      <button
+        :each="a in animList"
+        :key="a.id"
+        class="btn-anim-tab"
+        :class="{ active: a.id === activeAnimationId }"
+        :title="`${a.name} (${a.total_frames} frames)`"
+        @click="handleSelectAnim(a.id)"
+        @dblclick="handleRenameAnim(a)"
+      >
+        <span class="anim-tab-icon">{{ getAnimIcon(a.name) }}</span>
+        <span class="anim-tab-name">{{ a.name }}</span>
+        <span class="anim-tab-badge">{{ a.total_frames }}f</span>
+      </button>
+    </div>
+    <button
+      class="btn-anim-tab-new"
+      title="Crear nueva secuencia de animación para este personaje"
+      @click="onAddAnimation?.()"
+    >+ Nueva Animación</button>
+  </div>
+
+  <!-- Timeline Controls Toolbar -->
+  <div class="framestrip-toolbar">
+    <div class="transport-group">
+      <button
+        class="btn-tool btn-play"
+        :class="{ active: isPlaying }"
+        title="Play / Pause"
+        @click="onTogglePlay?.()"
+      >
+        <span :if="isPlaying">⏸ Pause</span>
+        <span :else>▶ Play</span>
+      </button>
+      <button class="btn-tool btn-prev" title="Previous Frame" @click="onStep?.(-1)">⏮</button>
+      <button class="btn-tool btn-next" title="Next Frame" @click="onStep?.(1)">⏭</button>
+    </div>
+
+    <div class="history-actions-group">
+      <button
+        class="btn-tool icon-only btn-undo"
+        :class="{ disabled: !canUndo }"
+        :disabled="!canUndo"
+        title="Deshacer (Cmd+Z / Ctrl+Z)"
+        @click="onUndo?.()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 7v6h6"></path>
+          <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+        </svg>
+      </button>
+      <button
+        class="btn-tool icon-only btn-redo"
+        :class="{ disabled: !canRedo }"
+        :disabled="!canRedo"
+        title="Rehacer (Cmd+Shift+Z / Ctrl+Shift+Z)"
+        @click="onRedo?.()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 7v6h-6"></path>
+          <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="frame-actions-group">
+      <button
+        class="btn-tool icon-only btn-duplicate"
+        title="Duplicar fotograma actual"
+        @click="onDuplicateFrame?.()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+      </button>
+      <button
+        class="btn-tool icon-only btn-delete"
+        :class="{ disabled: (totalFrames || 1) <= 1 }"
+        :disabled="(totalFrames || 1) <= 1"
+        title="Eliminar fotograma actual"
+        @click="onDeleteFrame?.()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 6h18"></path>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      </button>
+      <button
+        class="btn-tool icon-only btn-onion"
+        :class="{ active: onionSkin }"
+        title="Papel cebolla (Onion Skinning)"
+        @click="handleToggleOnion()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2C12 2 8 6 8 6C5.5 8.5 4 11.5 4 14.5C4 19 7.6 22 12 22C16.4 22 20 19 20 14.5C20 11.5 18.5 8.5 16 6L12 2Z"></path>
+          <path d="M12 6C12 6 9.5 9 9.5 9C8 10.5 7 12.5 7 14.5C7 17.5 9.2 19.5 12 19.5C14.8 19.5 17 17.5 17 14.5C17 12.5 16 10.5 14.5 9L12 6Z" opacity="0.5"></path>
+        </svg>
+      </button>
+
+      <button
+        :if="hasRangeSelection"
+        class="btn-tool icon-only btn-group-selection primary"
+        :title="`Agrupar fotogramas seleccionados (${rangeStart + 1}..${rangeEnd + 1}) con pivote e interpolación automática`"
+        @click="handleGroupSelection()"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <polyline points="3.29 7 12 12 20.71 7"></polyline>
+          <line x1="12" y1="22" x2="12" y2="12"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="frame-indicator">
+      <span>{{ frameIndicatorText }}</span>
+    </div>
+  </div>
+
+  <!-- Frames Reel -->
+  <div
+    class="frames-reel"
+    :class="{ 'reel-drag-active': draggingIndex !== null || isDraggingNew }"
+    @dragover="handleReelDragOver($event)"
+    @dragleave="handleReelDragLeave($event)"
+    @drop="handleDrop($event)"
+  >
+    <div :each="item in reelItems" :key="item.key">
+      <!-- Group intermediate block -->
+      <div :if="item.type === 'group'" class="group-intermediate-wrapper">
+        <div
+          class="active-group-pill in-reel"
+          :class="{ active: item.isGroupActive }"
+          @click="onSelectFrame?.(item.group.start_frame)"
+        >
+          <span class="group-pill-name" :title="`${item.group.name || 'Grupo'} (Fotogramas ${item.group.start_frame + 1}..${item.group.end_frame + 1})`">
+            ⚡ {{ item.group.name || 'Grupo' }}
+          </span>
+          <div class="group-pill-actions">
+            <button
+              class="btn-group-action btn-group-pivot"
+              :class="{ active: isPivotMode && item.isGroupActive }"
+              title="Ubicar eje de giro (pivote) en el canvas"
+              @click.stop="onToggleGroupPivotMode?.()"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <line x1="12" y1="2" x2="12" y2="6"></line>
+                <line x1="12" y1="18" x2="12" y2="22"></line>
+                <line x1="2" y1="12" x2="6" y2="12"></line>
+                <line x1="18" y1="12" x2="22" y2="12"></line>
+              </svg>
+            </button>
+            <button
+              class="btn-group-action btn-group-ungroup"
+              title="Desagrupar fotogramas"
+              @click.stop="onUngroupFrames?.(item.group.id)"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="group-intermediate-cells">
+          <button
+            :each="c in item.cells"
+            :key="c.index"
+            class="frame-cell in-group group-intermediate"
+            :class="{ active: c.isActive, 'in-range-selected': c.isInRange }"
+            :title="c.title"
+            @click="handleCellClick($event, c.index, true)"
+          >
+            <span class="cell-num">{{ c.index + 1 }}</span>
+            <span class="cell-intermediate-lock">🔒</span>
+            <img class="cell-thumb-canvas" :src="c.thumb" width="44" height="44" alt="Thumb" />
+          </button>
+        </div>
+      </div>
+
+      <!-- Single frame cell -->
+      <button
+        :else
+        class="frame-cell"
+        :class="{
+          active: item.cell.isActive,
+          'in-range-selected': item.cell.isInRange,
+          'in-group': item.cell.inGroup,
+          'group-start': item.cell.isGroupStart,
+          'group-end': item.cell.isGroupEnd,
+          'is-dragging': draggingIndex === item.cell.index
+        }"
+        draggable="true"
+        :title="item.cell.title"
+        @click="handleCellClick($event, item.cell.index, false)"
+        @dragstart="handleCellDragStart($event, item.cell.index)"
+        @dragend="cleanupDrag()"
+        @dragover="handleCellDragOver($event, item.cell.index)"
+      >
+        <span class="cell-num">{{ item.cell.index + 1 }}</span>
+        <span :if="item.cell.hasGroupPivot" class="cell-pivot-dot" :title="`Pivote: ${item.cell.pivotCoords}`">📍</span>
+        <img class="cell-thumb-canvas" :src="item.cell.thumb" width="44" height="44" alt="Thumb" />
+      </button>
+    </div>
+
+    <!-- Drag insertion slot indicator -->
+    <div :if="insertSlotIndex !== null" class="frame-insert-slot"></div>
+
+    <!-- Append / Drag New Cell -->
+    <button
+      class="frame-cell new"
+      :class="{ 'is-dragging': isDraggingNew }"
+      draggable="true"
+      title="Click to append frame, or drag to insert between existing frames"
+      @click="onAddFrame?.()"
+      @dragstart="handleNewDragStart($event)"
+      @dragend="cleanupDrag()"
+    >
+      <span class="cell-num">+</span>
+      <div class="cell-preview-thumb cell-new-thumb">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </div>
+    </button>
+  </div>
+</div>

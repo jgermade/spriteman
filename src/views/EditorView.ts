@@ -1,3 +1,4 @@
+import EditorViewComponent from './EditorView.html';
 /**
  * EditorView — Main Application Controller.
  * Switches between Welcome Screen (when no project open) and Full Editor Workspace (with Tab Strip & URL Hash).
@@ -9,29 +10,35 @@ import { storageService } from '../services/storage.service';
 import { tabsService, TabsState } from '../services/tabs.service';
 
 import { CanvasStage } from '../components/CanvasStage';
-import { FrameStrip } from '../components/FrameStrip';
-import { PixelPalette } from '../components/PixelPalette';
-import { AnimationSettings } from '../components/AnimationSettings';
-import { HierarchyTree } from '../components/HierarchyTree';
-import { InspectorPanel } from '../components/InspectorPanel';
-import { ProjectModal } from '../components/ProjectModal';
-import { ProjectTabs } from '../components/ProjectTabs';
-import { WelcomeScreen } from '../components/WelcomeScreen';
+import FrameStripComponent from '../components/FrameStrip.html';
+import HierarchyTreeComponent from '../components/HierarchyTree.html';
+
+import PixelPaletteComponent from '../components/PixelPalette.html';
+import AnimationSettingsComponent from '../components/AnimationSettings.html';
+import InspectorPanelComponent from '../components/InspectorPanel.html';
+import ProjectModalComponent from '../components/ProjectModal.html';
+import ProjectTabsComponent from '../components/ProjectTabs.html';
+import WelcomeScreenComponent from '../components/WelcomeScreen.html';
+
+import { STANDARD_PIXEL_SIZES, PIXEL_ART_PALETTE } from '../helpers/palette.helper';
+import { formatMatrix } from '../helpers/format.helper';
 
 export class EditorView {
   private root: HTMLElement;
   private canvasStage: CanvasStage;
-  private frameStrip: FrameStrip;
-  private pixelPalette: PixelPalette;
-  private animationSettings: AnimationSettings;
-  private hierarchyTree: HierarchyTree;
-  private inspectorPanel: InspectorPanel;
-  private projectModal: ProjectModal;
-  private projectTabs: ProjectTabs;
-  private welcomeScreen: WelcomeScreen;
+  private frameStrip: any;
+  private hierarchyTree: any;
+  private pixelPalette: any;
+  private animationSettings: any;
+  private inspectorPanel: any;
+  private projectModal: any;
+  private projectTabs: any;
+  private welcomeScreen: any;
+  private component: any;
 
   private currentZoom = 6;
   private activeProjectName = '';
+  private isTempSwapped = false;
 
   constructor() {
     this.root = document.createElement('div');
@@ -87,17 +94,139 @@ export class EditorView {
       },
     });
 
-    this.frameStrip = new FrameStrip({
+    this.pixelPalette = PixelPaletteComponent;
+    this.animationSettings = AnimationSettingsComponent;
+    this.hierarchyTree = HierarchyTreeComponent;
+    this.frameStrip = FrameStripComponent;
+    this.inspectorPanel = InspectorPanelComponent;
+    this.projectTabs = ProjectTabsComponent;
+    this.projectModal = ProjectModalComponent;
+    this.welcomeScreen = WelcomeScreenComponent;
+
+    this.buildLayout();
+    this.bindServices();
+    this.initKeyboardShortcuts();
+    this.initAppFlow();
+  }
+
+  public getElement(): HTMLElement {
+    return this.root;
+  }
+
+  private buildLayout(): void {
+    this.component = EditorViewComponent;
+    this.component.mount(this.root, {
+      hasActiveProject: false,
+      canvasWidth: 64,
+      canvasHeight: 64,
+      fps: 12,
+      isInstallable: pwaService.getState().isInstallable,
+      saveButtonText: "💾 Save",
+      onSave: () => this.saveCurrentProject(),
+      onInstall: () => pwaService.promptInstall(),
+    });
+
+    this.projectTabs.mount(this.root.querySelector(".tabs-wrapper"), {
+      tabs: [],
+      activeTab: null,
+      onSelectTab: (tabId: string) => tabsService.selectTab(tabId),
+      onCloseTab: (tabId: string) => tabsService.closeTab(tabId),
+      onNewTab: async () => {
+        const files = await storageService.listFiles();
+        if (this.projectModal.data) {
+          this.projectModal.data.savedFiles = files;
+          this.projectModal.data.currentTab = "new";
+          this.projectModal.data.isOpen = true;
+        }
+      },
+    });
+
+    this.welcomeScreen.mount(this.root.querySelector(".welcome-screen-wrapper"), {
+      savedFiles: [],
+      sizes: STANDARD_PIXEL_SIZES,
+      onCreateProject: (name: string, w: number, h: number, fps: number) => this.handleCreateProject(name, w, h, fps),
+      onOpenProject: (filename: string) => this.handleOpenProject(filename),
+      onOpenSample: () => this.handleOpenSample(),
+      onImportJson: (json: string) => this.handleImportJson(json),
+    });
+
+    this.root.querySelector(".canvas-stage-wrapper")?.appendChild(this.canvasStage.getElement());
+
+    this.hierarchyTree.mount(this.root.querySelector(".hierarchy-wrapper"), {
+      layers: [],
+      selectedLayerId: null,
+      isPivotMode: false,
+      onSelectLayer: (layerId: string) => {
+        projectService.selectLayer(layerId);
+        const currentInt = Math.round(animationService.getState().currentFrame);
+        const layer = projectService.getState().layers.find((l) => l.id === layerId);
+        const group = projectService.getActiveLayerGroupForFrame(currentInt);
+        const pivot = group?.pivot ?? layer?.pivot ?? layer?.default_transform?.pivot ?? null;
+        this.canvasStage.setPivot(pivot);
+      },
+      onAddLayer: () => {
+        projectService.addLayer();
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onToggleLayerRelative: (layerId: string) => {
+        projectService.toggleLayerRelative(layerId);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onToggleLayerVisibility: (layerId: string) => {
+        projectService.toggleLayerVisibility(layerId);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onRenameLayer: (layerId: string, name: string) => {
+        projectService.renameLayer(layerId, name);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onDeleteLayer: (layerId: string) => {
+        if (projectService.deleteLayer(layerId)) {
+          animationService.reloadProject(projectService.getRawJson());
+          this.saveCurrentProject();
+        }
+      },
+      onTogglePivotMode: () => {
+        const next = !this.canvasStage.isPivotMode();
+        this.canvasStage.setPivotMode(next);
+        if (this.hierarchyTree.data) this.hierarchyTree.data.isPivotMode = next;
+        if (this.frameStrip.data) this.frameStrip.data.isPivotMode = next;
+      },
+      onReorderLayer: (layerId: string, targetIndex: number, newParentId: string | null) => {
+        projectService.reorderLayer(layerId, targetIndex, newParentId);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+    });
+
+    this.frameStrip.mount(this.root.querySelector(".framestrip-wrapper"), {
       totalFrames: 1,
       currentFrame: 0,
       isPlaying: false,
       onionSkin: true,
+      spriteWidth: 64,
+      spriteHeight: 64,
+      framePixels: {},
+      animations: [],
+      activeAnimationId: '',
+      layerGroups: [],
+      activeGroup: null,
+      isPivotMode: false,
+      canUndo: false,
+      canRedo: false,
       onTogglePlay: () => animationService.togglePlay(),
-      onSelectFrame: (idx) => {
+      onSelectFrame: (idx: number) => {
         animationService.pause();
         animationService.seek(idx);
       },
-      onStep: (delta) => animationService.step(delta),
+      onSelectRange: (start: number, end: number) => {
+        // Range selection handled inside FrameStrip
+      },
+      onStep: (delta: number) => animationService.step(delta),
       onAddFrame: (targetIndex?: number) => {
         const newIdx = typeof targetIndex === 'number'
           ? projectService.insertFrame(targetIndex, true)
@@ -106,16 +235,10 @@ export class EditorView {
         animationService.seek(newIdx);
         this.saveCurrentProject();
       },
-      onReorderFrame: (from, to) => {
+      onReorderFrame: (from: number, to: number) => {
         projectService.reorderFrame(from, to);
         animationService.reloadProject(projectService.getRawJson());
         animationService.seek(to);
-        this.saveCurrentProject();
-      },
-      onInterpolateFrames: (startFrame, endFrame) => {
-        projectService.interpolateMotion(startFrame, endFrame);
-        animationService.reloadProject(projectService.getRawJson());
-        animationService.seek(startFrame);
         this.saveCurrentProject();
       },
       onDuplicateFrame: () => {
@@ -133,10 +256,8 @@ export class EditorView {
         animationService.seek(nextInt);
         this.saveCurrentProject();
       },
-      onToggleOnionSkin: (enabled) => animationService.setOnionSkinEnabled(enabled),
-
-      // Layer Frame Grouping
-      onGroupFrames: (start, end) => {
+      onToggleOnionSkin: (enabled: boolean) => animationService.setOnionSkinEnabled(enabled),
+      onGroupFrames: (start: number, end: number) => {
         const selectedId = projectService.getState().selectedLayerId;
         if (selectedId) {
           projectService.createFrameGroup(selectedId, start, end);
@@ -144,7 +265,7 @@ export class EditorView {
           this.saveCurrentProject();
         }
       },
-      onUngroupFrames: (groupId) => {
+      onUngroupFrames: (groupId: string) => {
         const selectedId = projectService.getState().selectedLayerId;
         if (selectedId) {
           projectService.deleteFrameGroup(selectedId, groupId);
@@ -155,36 +276,10 @@ export class EditorView {
       onToggleGroupPivotMode: () => {
         const next = !this.canvasStage.isPivotMode();
         this.canvasStage.setPivotMode(next);
-        const proj = projectService.getState();
-        const currentInt = Math.round(animationService.getState().currentFrame);
-        const activeLayer = proj.layers.find((l) => l.id === proj.selectedLayerId);
-        const layerGroups = activeLayer?.groups || [];
-        const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
-        this.frameStrip.update(
-          currentInt,
-          proj.meta.total_frames,
-          animationService.getState().isPlaying,
-          proj.frame_pixels,
-          proj.meta.canvas_width,
-          proj.meta.canvas_height,
-          proj.animations,
-          proj.activeAnimationId,
-          layerGroups,
-          activeGroup,
-          next
-        );
+        if (this.frameStrip.data) this.frameStrip.data.isPivotMode = next;
+        if (this.hierarchyTree.data) this.hierarchyTree.data.isPivotMode = next;
       },
-      onInterpolateGroup: (groupId) => {
-        const selectedId = projectService.getState().selectedLayerId;
-        if (selectedId) {
-          projectService.interpolateGroupMotion(selectedId, groupId);
-          animationService.reloadProject(projectService.getRawJson());
-          this.saveCurrentProject();
-        }
-      },
-
-      // Multi-Animation Clips
-      onSelectAnimation: (animId) => {
+      onSelectAnimation: (animId: string) => {
         projectService.selectAnimation(animId);
         animationService.reloadProject(projectService.getRawJson());
         animationService.seek(0);
@@ -199,11 +294,11 @@ export class EditorView {
           this.saveCurrentProject();
         }
       },
-      onRenameAnimation: (animId, name) => {
+      onRenameAnimation: (animId: string, name: string) => {
         projectService.renameAnimation(animId, name);
         this.saveCurrentProject();
       },
-      onDeleteAnimation: (animId) => {
+      onDeleteAnimation: (animId: string) => {
         projectService.deleteAnimation(animId);
         animationService.reloadProject(projectService.getRawJson());
         animationService.seek(0);
@@ -213,217 +308,88 @@ export class EditorView {
       onRedo: () => this.handleRedo(),
     });
 
-    this.pixelPalette = new PixelPalette({
-      primaryColor: '#000000',
-      secondaryColor: '#ffffff',
-      onSelectPrimary: (color) => {
-        this.canvasStage.setPrimaryColor(color);
-        const selectedId = projectService.getState().selectedLayerId;
-        if (selectedId) {
-          projectService.setLayerColor(selectedId, color);
-          animationService.reloadProject(projectService.getRawJson());
-          this.saveCurrentProject();
+    this.inspectorPanel.mount(this.root.querySelector(".inspector-wrapper"), {
+      item: null,
+      matrixText: "",
+    });
+
+    this.pixelPalette.mount(this.root.querySelector(".palette-wrapper"), {
+      primaryColor: "#000000",
+      secondaryColor: "#ffffff",
+      isTempSwapped: false,
+      palette: PIXEL_ART_PALETTE,
+      onSelectPrimary: (color: string) => {
+        if (this.pixelPalette.data) {
+          this.pixelPalette.data.primaryColor = color;
         }
+        this.canvasStage.setPrimaryColor(color);
       },
-      onSelectSecondary: (color) => {
+      onSelectSecondary: (color: string) => {
+        if (this.pixelPalette.data) {
+          this.pixelPalette.data.secondaryColor = color;
+        }
         this.canvasStage.setSecondaryColor(color);
       },
-      onSelectColors: (primary, secondary) => {
+      onSelectColors: (primary: string, secondary: string) => {
+        if (this.pixelPalette.data) {
+          this.pixelPalette.data.primaryColor = primary;
+          this.pixelPalette.data.secondaryColor = secondary;
+        }
         this.canvasStage.setColors(primary, secondary);
+      },
+      onSwapColors: () => {
+        this.swapPaletteColors();
       },
     });
 
-    this.animationSettings = new AnimationSettings({
-      currentWidth: 64,
-      currentHeight: 64,
-      currentFps: 12,
-      currentZoom: this.currentZoom,
-      onChangeCanvasSize: (w, h) => {
+    this.animationSettings.mount(this.root.querySelector(".settings-wrapper"), {
+      width: 64,
+      height: 64,
+      fps: 12,
+      zoom: this.currentZoom,
+      sizes: STANDARD_PIXEL_SIZES,
+      onChangeCanvasSize: (w: number, h: number) => {
         projectService.setCanvasSize(w, h);
         this.canvasStage.setCanvasSize(w, h);
         animationService.reloadProject(projectService.getRawJson());
         this.saveCurrentProject();
       },
-      onChangeFps: (fps) => {
+      onChangeFps: (fps: number) => {
         projectService.setFps(fps);
         animationService.setFps(fps);
         animationService.reloadProject(projectService.getRawJson());
         this.saveCurrentProject();
       },
-      onChangeZoom: (zoom) => {
+      onChangeZoom: (zoom: number) => {
         this.currentZoom = zoom;
         this.canvasStage.setZoom(zoom);
       },
     });
 
-    this.hierarchyTree = new HierarchyTree({
-      onSelectLayer: (layerId) => {
-        projectService.selectLayer(layerId);
-        const currentInt = Math.round(animationService.getState().currentFrame);
-        const layer = projectService.getState().layers.find((l) => l.id === layerId);
-        const group = projectService.getActiveLayerGroupForFrame(currentInt);
-        const pivot = group?.pivot ?? layer?.pivot ?? layer?.default_transform?.pivot ?? null;
-        this.canvasStage.setPivot(pivot);
+    this.projectModal.mount(this.root.querySelector(".modal-wrapper"), {
+      isOpen: false,
+      currentTab: "new",
+      savedFiles: [],
+      sizes: STANDARD_PIXEL_SIZES,
+      onCreate: (name: string, w: number, h: number, fps: number) => {
+        this.handleCreateProject(name, w, h, fps);
+        if (this.projectModal.data) this.projectModal.data.isOpen = false;
       },
-      onAddLayer: () => {
-        projectService.addLayer();
-        animationService.reloadProject(projectService.getRawJson());
-        this.saveCurrentProject();
+      onOpen: (filename: string) => {
+        this.handleOpenProject(filename);
+        if (this.projectModal.data) this.projectModal.data.isOpen = false;
       },
-      onToggleLayerRelative: (layerId) => {
-        projectService.toggleLayerRelative(layerId);
-        animationService.reloadProject(projectService.getRawJson());
-        this.saveCurrentProject();
+      onLoadSample: () => {
+        this.handleOpenSample();
+        if (this.projectModal.data) this.projectModal.data.isOpen = false;
       },
-      onToggleLayerVisibility: (layerId) => {
-        projectService.toggleLayerVisibility(layerId);
-        animationService.reloadProject(projectService.getRawJson());
-        this.saveCurrentProject();
+      onImportJson: (json: string) => {
+        this.handleImportJson(json);
+        if (this.projectModal.data) this.projectModal.data.isOpen = false;
       },
-      onRenameLayer: (layerId, name) => {
-        projectService.renameLayer(layerId, name);
-        animationService.reloadProject(projectService.getRawJson());
-        this.saveCurrentProject();
+      onClose: () => {
+        if (this.projectModal.data) this.projectModal.data.isOpen = false;
       },
-      onDeleteLayer: (layerId) => {
-        if (projectService.deleteLayer(layerId)) {
-          animationService.reloadProject(projectService.getRawJson());
-          this.saveCurrentProject();
-        }
-      },
-      onTogglePivotMode: () => {
-        const next = !this.canvasStage.isPivotMode();
-        this.canvasStage.setPivotMode(next);
-        const proj = projectService.getState();
-        this.hierarchyTree.update(proj.layers, proj.selectedLayerId, next);
-      },
-      onReorderLayer: (layerId, targetIndex, newParentId) => {
-        projectService.reorderLayer(layerId, targetIndex, newParentId);
-        animationService.reloadProject(projectService.getRawJson());
-        this.saveCurrentProject();
-      },
-    });
-
-    this.inspectorPanel = new InspectorPanel();
-
-    this.projectTabs = new ProjectTabs({
-      onSelectTab: (tabId) => tabsService.selectTab(tabId),
-      onCloseTab: (tabId) => tabsService.closeTab(tabId),
-      onNewTab: async () => {
-        const files = await storageService.listFiles();
-        this.projectModal.setFiles(files);
-        this.projectModal.show('new');
-      },
-    });
-
-    this.projectModal = new ProjectModal({
-      onCreate: (name, w, h, fps) => this.handleCreateProject(name, w, h, fps),
-      onOpen: (filename) => this.handleOpenProject(filename),
-      onLoadSample: () => this.handleOpenSample(),
-      onImportJson: (json) => this.handleImportJson(json),
-    });
-
-    this.welcomeScreen = new WelcomeScreen({
-      onCreateProject: (name, w, h, fps) => this.handleCreateProject(name, w, h, fps),
-      onOpenProject: (filename) => this.handleOpenProject(filename),
-      onOpenSample: () => this.handleOpenSample(),
-      onImportJson: (json) => this.handleImportJson(json),
-    });
-
-    this.buildLayout();
-    this.bindServices();
-    this.initKeyboardShortcuts();
-    this.initAppFlow();
-  }
-
-  public getElement(): HTMLElement {
-    return this.root;
-  }
-
-  private buildLayout(): void {
-    this.root.innerHTML = `
-      <!-- Top Application Bar -->
-      <div class="app-topbar">
-        <div class="topbar-left">
-          <div class="app-logo">
-            <img src="./icon-192.svg" class="logo-pixel-img" width="22" height="22" alt="Logo" />
-            <span class="logo-text">Spritemotion</span>
-          </div>
-
-          <!-- Project Tabs Strip -->
-          <div class="tabs-wrapper"></div>
-        </div>
-
-        <div class="topbar-center">
-          <span id="topbar-size-badge" class="badge-tag" style="display: none;">64 × 64 px</span>
-          <span id="topbar-fps-badge" class="badge-tag" style="display: none;">12 FPS</span>
-        </div>
-
-        <div class="topbar-right">
-          <button id="btn-topbar-undo" class="topbar-btn" title="Deshacer (Cmd+Z)" style="display: none;">↶ Deshacer</button>
-          <button id="btn-topbar-redo" class="topbar-btn" title="Rehacer (Cmd+Shift+Z)" style="display: none;">↷ Rehacer</button>
-          <button id="btn-menu-save" class="topbar-btn primary" title="Save Project to WASMFS" style="display: none;">💾 Save</button>
-          <button id="pwa-install-btn" class="pwa-install-btn" style="display: none;">⬇ Install App</button>
-        </div>
-      </div>
-
-      <!-- Welcome Screen (Shown when no project is open) -->
-      <div class="welcome-screen-wrapper"></div>
-
-      <!-- Main Docked Editor Workspace (Hidden when no project is open) -->
-      <div class="app-workspace" style="display: none;">
-        <!-- Center Canvas & Bottom Timeline -->
-        <div class="center-workspace">
-          <div class="canvas-viewport-panel">
-            <div class="canvas-stage-wrapper"></div>
-          </div>
-          <div class="timeline-docked-panel">
-            <div class="framestrip-wrapper"></div>
-          </div>
-        </div>
-
-        <!-- Right Side Tools Sidebar -->
-        <div class="sidebar-docked-panel">
-          <div class="sidebar-scrollable">
-            <div class="hierarchy-wrapper"></div>
-            <div class="inspector-wrapper"></div>
-            <div class="palette-wrapper"></div>
-            <div class="settings-wrapper"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Modal Container -->
-      <div class="modal-wrapper"></div>
-    `;
-
-    // Append component elements
-    this.root.querySelector('.tabs-wrapper')!.appendChild(this.projectTabs.getElement());
-    this.root.querySelector('.welcome-screen-wrapper')!.appendChild(this.welcomeScreen.getElement());
-    this.root.querySelector('.canvas-stage-wrapper')!.appendChild(this.canvasStage.getElement());
-    this.root.querySelector('.framestrip-wrapper')!.appendChild(this.frameStrip.getElement());
-    this.root.querySelector('.hierarchy-wrapper')!.appendChild(this.hierarchyTree.getElement());
-    this.root.querySelector('.inspector-wrapper')!.appendChild(this.inspectorPanel.getElement());
-    this.root.querySelector('.palette-wrapper')!.appendChild(this.pixelPalette.getElement());
-    this.root.querySelector('.settings-wrapper')!.appendChild(this.animationSettings.getElement());
-    this.root.querySelector('.modal-wrapper')!.appendChild(this.projectModal.getElement());
-
-    // Topbar undo / redo actions
-    this.root.querySelector('#btn-topbar-undo')?.addEventListener('click', () => {
-      this.handleUndo();
-    });
-    this.root.querySelector('#btn-topbar-redo')?.addEventListener('click', () => {
-      this.handleRedo();
-    });
-
-    // Topbar save action
-    this.root.querySelector('#btn-menu-save')?.addEventListener('click', () => {
-      this.saveCurrentProject();
-    });
-
-    // PWA install button
-    this.root.querySelector('#pwa-install-btn')?.addEventListener('click', () => {
-      pwaService.promptInstall();
     });
   }
 
@@ -447,6 +413,14 @@ export class EditorView {
       animationService.seek(curF);
       this.saveCurrentProject();
     }
+  }
+
+  private swapPaletteColors(): void {
+    if (!this.pixelPalette.data) return;
+    const temp = this.pixelPalette.data.primaryColor;
+    this.pixelPalette.data.primaryColor = this.pixelPalette.data.secondaryColor;
+    this.pixelPalette.data.secondaryColor = temp;
+    this.canvasStage.setColors(this.pixelPalette.data.primaryColor, this.pixelPalette.data.secondaryColor);
   }
 
   private initKeyboardShortcuts(): void {
@@ -496,6 +470,34 @@ export class EditorView {
         this.saveCurrentProject();
         return;
       }
+
+      // Palette color swap shortcuts: X or temporary swap with Cmd/Alt
+      if (e.key === 'x' || e.key === 'X') {
+        this.swapPaletteColors();
+        return;
+      }
+
+      if ((e.key === 'Meta' || e.key === 'Alt') && !this.isTempSwapped) {
+        this.isTempSwapped = true;
+        this.swapPaletteColors();
+        if (this.pixelPalette.data) this.pixelPalette.data.isTempSwapped = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (this.isTempSwapped && (e.key === 'Meta' || e.key === 'Alt') && !e.metaKey && !e.altKey) {
+        this.isTempSwapped = false;
+        this.swapPaletteColors();
+        if (this.pixelPalette.data) this.pixelPalette.data.isTempSwapped = false;
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      if (this.isTempSwapped) {
+        this.isTempSwapped = false;
+        this.swapPaletteColors();
+        if (this.pixelPalette.data) this.pixelPalette.data.isTempSwapped = false;
+      }
     });
   }
 
@@ -511,8 +513,8 @@ export class EditorView {
 
     // Refresh file list in welcome and modal
     const updatedFiles = await storageService.listFiles();
-    this.welcomeScreen.setFiles(updatedFiles);
-    this.projectModal.setFiles(updatedFiles);
+    if (this.welcomeScreen.data) this.welcomeScreen.data.savedFiles = updatedFiles;
+    if (this.projectModal.data) this.projectModal.data.savedFiles = updatedFiles;
 
     // 2. Read tabs from URL hash: #tabs=<id1>,#<active>,<id2>
     const initialTabsState = tabsService.getState();
@@ -520,40 +522,27 @@ export class EditorView {
   }
 
   private async applyTabsState(state: TabsState): Promise<void> {
-    this.projectTabs.update(state.tabs, state.activeTab);
-
-    const workspace = this.root.querySelector('.app-workspace') as HTMLElement;
-    const welcomeWrapper = this.root.querySelector('.welcome-screen-wrapper') as HTMLElement;
-    const saveBtn = this.root.querySelector('#btn-menu-save') as HTMLElement;
-    const undoBtn = this.root.querySelector('#btn-topbar-undo') as HTMLElement;
-    const redoBtn = this.root.querySelector('#btn-topbar-redo') as HTMLElement;
-    const sizeBadge = this.root.querySelector('#topbar-size-badge') as HTMLElement;
-    const fpsBadge = this.root.querySelector('#topbar-fps-badge') as HTMLElement;
-
-    if (state.tabs.length === 0 || !state.activeTab) {
-      // NO project open: DO NOT show editor behind! Show clean Welcome Screen.
-      workspace.style.display = 'none';
-      welcomeWrapper.style.display = 'flex';
-      saveBtn.style.display = 'none';
-      if (undoBtn) undoBtn.style.display = 'none';
-      if (redoBtn) redoBtn.style.display = 'none';
-      sizeBadge.style.display = 'none';
-      fpsBadge.style.display = 'none';
-
-      animationService.pause();
-      const files = await storageService.listFiles();
-      this.welcomeScreen.setFiles(files);
-      return;
+    if (this.projectTabs.data) {
+      this.projectTabs.data.tabs = state.tabs;
+      this.projectTabs.data.activeTab = state.activeTab;
     }
 
-    // At least 1 project open: Open directly and hide welcome screen!
-    welcomeWrapper.style.display = 'none';
-    workspace.style.display = 'grid';
-    saveBtn.style.display = 'inline-flex';
-    if (undoBtn) undoBtn.style.display = 'inline-flex';
-    if (redoBtn) redoBtn.style.display = 'inline-flex';
-    sizeBadge.style.display = 'inline-block';
-    fpsBadge.style.display = 'inline-block';
+    const hasProject = state.tabs.length > 0 && !!state.activeTab;
+    const projState = projectService.getState();
+
+    if (this.component?.data) {
+      this.component.data.hasActiveProject = hasProject;
+      this.component.data.canvasWidth = projState.meta.canvas_width;
+      this.component.data.canvasHeight = projState.meta.canvas_height;
+      this.component.data.fps = projState.meta.fps;
+    }
+
+    if (!hasProject) {
+      animationService.pause();
+      const files = await storageService.listFiles();
+      if (this.welcomeScreen.data) this.welcomeScreen.data.savedFiles = files;
+      return;
+    }
 
     // Load active tab content from WASMFS
     await this.loadActiveProject(state.activeTab);
@@ -613,12 +602,12 @@ export class EditorView {
     const json = projectService.getRawJson();
     await storageService.saveFile(this.activeProjectName, json);
 
-    const saveBtn = this.root.querySelector('#btn-menu-save') as HTMLButtonElement;
-    if (saveBtn) {
-      const original = saveBtn.textContent;
-      saveBtn.textContent = '✓ Saved!';
+    if (this.component?.data) {
+      this.component.data.saveButtonText = '✓ Saved!';
       setTimeout(() => {
-        saveBtn.textContent = original;
+        if (this.component?.data) {
+          this.component.data.saveButtonText = '💾 Save';
+        }
       }, 1200);
     }
   }
@@ -640,21 +629,21 @@ export class EditorView {
 
       const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
 
-      this.frameStrip.update(
-        animState.currentFrame,
-        animState.totalFrames,
-        animState.isPlaying,
-        proj.frame_pixels,
-        proj.meta.canvas_width,
-        proj.meta.canvas_height,
-        proj.animations,
-        proj.activeAnimationId,
-        layerGroups,
-        activeGroup,
-        isPivot,
-        projectService.canUndo(),
-        projectService.canRedo()
-      );
+      if (this.frameStrip.data) {
+        this.frameStrip.data.currentFrame = animState.currentFrame;
+        this.frameStrip.data.totalFrames = animState.totalFrames;
+        this.frameStrip.data.isPlaying = animState.isPlaying;
+        this.frameStrip.data.framePixels = proj.frame_pixels;
+        this.frameStrip.data.spriteWidth = proj.meta.canvas_width;
+        this.frameStrip.data.spriteHeight = proj.meta.canvas_height;
+        this.frameStrip.data.animations = proj.animations;
+        this.frameStrip.data.activeAnimationId = proj.activeAnimationId;
+        this.frameStrip.data.layerGroups = layerGroups;
+        this.frameStrip.data.activeGroup = activeGroup;
+        this.frameStrip.data.isPivotMode = isPivot;
+        this.frameStrip.data.canUndo = projectService.canUndo();
+        this.frameStrip.data.canRedo = projectService.canRedo();
+      }
 
       const currentPixels = isLayerVisible ? projectService.getFramePixels(currentInt) : {};
       const prevInt = Math.max(0, currentInt - 1);
@@ -670,80 +659,80 @@ export class EditorView {
         this.canvasStage.render(animState.resolvedFrame.items, selectedId, onionItems);
 
         const selectedItem = animState.resolvedFrame.items.find((i) => i.layer_id === selectedId);
-        this.inspectorPanel.update(selectedItem || null);
+        if (this.inspectorPanel.data) {
+          this.inspectorPanel.data.item = selectedItem || null;
+          this.inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
+        }
       }
     });
 
     // 3. Project service updates
     projectService.subscribe((projState: ProjectState) => {
       const isPivot = this.canvasStage.isPivotMode();
-      this.hierarchyTree.update(projState.layers, projState.selectedLayerId, isPivot);
+      if (this.hierarchyTree.data) {
+        this.hierarchyTree.data.layers = projState.layers;
+        this.hierarchyTree.data.selectedLayerId = projState.selectedLayerId;
+        this.hierarchyTree.data.isPivotMode = isPivot;
+      }
 
       const anim = animationService.getState();
       const currentInt = Math.round(anim.currentFrame);
-      const activeLayer = projState.layers.find((l) => l.id === projState.selectedLayerId);
+      const activeLayer = (projState.layers || []).find((l) => l && l.id === projState.selectedLayerId);
       const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
       const layerGroups = activeLayer?.groups || [];
       const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
       const pivot = activeGroup?.pivot ?? activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
       this.canvasStage.setPivot(pivot);
 
-      const sizeBadge = this.root.querySelector('#topbar-size-badge');
-      if (sizeBadge) {
-        sizeBadge.textContent = `${projState.meta.canvas_width} × ${projState.meta.canvas_height} px`;
+      if (this.component?.data) {
+        this.component.data.canvasWidth = projState.meta.canvas_width;
+        this.component.data.canvasHeight = projState.meta.canvas_height;
+        this.component.data.fps = projState.meta.fps;
       }
-
-      const fpsBadge = this.root.querySelector('#topbar-fps-badge');
-      if (fpsBadge) {
-        fpsBadge.textContent = `${projState.meta.fps} FPS`;
-      }
-
-      const undoBtn = this.root.querySelector('#btn-topbar-undo') as HTMLButtonElement | null;
-      const redoBtn = this.root.querySelector('#btn-topbar-redo') as HTMLButtonElement | null;
-      if (undoBtn) undoBtn.disabled = !projectService.canUndo();
-      if (redoBtn) redoBtn.disabled = !projectService.canRedo();
 
       this.canvasStage.setCanvasSize(projState.meta.canvas_width, projState.meta.canvas_height);
-      this.animationSettings.setValues(
-        projState.meta.canvas_width,
-        projState.meta.canvas_height,
-        projState.meta.fps,
-        this.currentZoom
-      );
+      if (this.animationSettings.data) {
+        this.animationSettings.data.width = projState.meta.canvas_width;
+        this.animationSettings.data.height = projState.meta.canvas_height;
+        this.animationSettings.data.fps = projState.meta.fps;
+        this.animationSettings.data.zoom = this.currentZoom;
+      }
 
       const currentPixels = isLayerVisible ? (projState.frame_pixels[currentInt] || {}) : {};
       const prevInt = Math.max(0, currentInt - 1);
       const onionPixels = anim.onionSkinEnabled && currentInt > 0 && isLayerVisible ? (projState.frame_pixels[prevInt] || {}) : null;
       this.canvasStage.setFramePixels(currentPixels, onionPixels);
 
-      this.frameStrip.update(
-        anim.currentFrame,
-        projState.meta.total_frames,
-        anim.isPlaying,
-        projState.frame_pixels,
-        projState.meta.canvas_width,
-        projState.meta.canvas_height,
-        projState.animations,
-        projState.activeAnimationId,
-        layerGroups,
-        activeGroup,
-        isPivot,
-        projectService.canUndo(),
-        projectService.canRedo()
-      );
+      if (this.frameStrip.data) {
+        this.frameStrip.data.currentFrame = anim.currentFrame;
+        this.frameStrip.data.totalFrames = projState.meta.total_frames;
+        this.frameStrip.data.isPlaying = anim.isPlaying;
+        this.frameStrip.data.framePixels = projState.frame_pixels;
+        this.frameStrip.data.spriteWidth = projState.meta.canvas_width;
+        this.frameStrip.data.spriteHeight = projState.meta.canvas_height;
+        this.frameStrip.data.animations = projState.animations;
+        this.frameStrip.data.activeAnimationId = projState.activeAnimationId;
+        this.frameStrip.data.layerGroups = layerGroups;
+        this.frameStrip.data.activeGroup = activeGroup;
+        this.frameStrip.data.isPivotMode = isPivot;
+        this.frameStrip.data.canUndo = projectService.canUndo();
+        this.frameStrip.data.canRedo = projectService.canRedo();
+      }
 
       if (anim.resolvedFrame) {
         const selectedItem = anim.resolvedFrame.items.find((i) => i.layer_id === projState.selectedLayerId);
-        this.inspectorPanel.update(selectedItem || null);
+        if (this.inspectorPanel.data) {
+          this.inspectorPanel.data.item = selectedItem || null;
+          this.inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
+        }
         this.canvasStage.render(anim.resolvedFrame.items, projState.selectedLayerId, anim.onionSkinFrame?.items);
       }
     });
 
     // 4. PWA state updates
     pwaService.subscribe((pwa: PwaState) => {
-      const installBtn = this.root.querySelector('#pwa-install-btn') as HTMLElement;
-      if (installBtn) {
-        installBtn.style.display = pwa.isInstallable ? 'inline-flex' : 'none';
+      if (this.component?.data) {
+        this.component.data.isInstallable = pwa.isInstallable;
       }
     });
   }

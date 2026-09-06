@@ -1,0 +1,34 @@
+<script :setup="{ item, matrixText }" type="text/typescript">
+  $: opacityPercent = item ? (item.opacity * 100).toFixed(0) + '%' : '100%';
+  $: tx = item?.matrix ? item.matrix[4].toFixed(1) : '0.0';
+  $: ty = item?.matrix ? item.matrix[5].toFixed(1) : '0.0';
+</script>
+
+<div class="inspector-panel">
+  <div :if="!item">
+    <div class="panel-header">
+      <span class="panel-title">Layer Inspector</span>
+    </div>
+    <div class="panel-empty">No layer selected</div>
+  </div>
+  <div :else>
+    <div class="panel-header">
+      <span class="panel-title">Inspector: {{ item.layer_name }}</span>
+      <span class="badge">Z: {{ item.z_index }}</span>
+    </div>
+    <div class="inspector-props">
+      <div class="prop-row">
+        <span class="prop-label">Opacity:</span>
+        <span class="prop-val">{{ opacityPercent }}</span>
+      </div>
+      <div class="prop-row">
+        <span class="prop-label">World TX, TY:</span>
+        <span class="prop-val">{{ tx }}, {{ ty }}</span>
+      </div>
+      <div class="prop-row">
+        <span class="prop-label">Transform Matrix:</span>
+      </div>
+      <pre class="matrix-code">{{ matrixText || '' }}</pre>
+    </div>
+  </div>
+</div>

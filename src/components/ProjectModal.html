@@ -1,0 +1,156 @@
+<script :setup="{
+  isOpen,
+  currentTab,
+  savedFiles,
+  sizes,
+  onCreate,
+  onOpen,
+  onLoadSample,
+  onImportJson,
+  onClose
+}" type="text/typescript">
+  let projectName = 'sprite_character_1';
+  let canvasSize = '64x64';
+  let fps = '12';
+
+  $: standardSizes = sizes || [];
+
+  const handleCreate = () => {
+    const name = projectName.trim() || 'pixel_sprite';
+    const [w, h] = canvasSize.split('x').map(Number);
+    const speed = parseInt(fps, 10) || 12;
+    onCreate?.(name, w, h, speed);
+  };
+
+  const handleOpen = (filename: string) => {
+    onOpen?.(filename);
+  };
+
+  const handleSample = () => {
+    onLoadSample?.();
+  };
+
+  const handleFileInput = (e: Event) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        onImportJson?.(reader.result as string);
+      };
+      reader.readAsText(file);
+    }
+  };
+
+  const formatDate = (t: number) => new Date(t).toLocaleDateString();
+</script>
+
+<div class="modal-backdrop" :style="`display: ${isOpen ? 'flex' : 'none'};`">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <div class="modal-tabs">
+        <button
+          class="modal-tab"
+          :class="{ active: currentTab === 'new' || !currentTab }"
+          @click="currentTab = 'new'"
+        >
+          📄 New Project
+        </button>
+        <button
+          class="modal-tab"
+          :class="{ active: currentTab === 'open' }"
+          @click="currentTab = 'open'"
+        >
+          📁 Open Project ({{ savedFiles ? savedFiles.length : 0 }})
+        </button>
+      </div>
+      <button class="modal-close" title="Close" @click="onClose?.()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <!-- New Tab -->
+      <div :if="currentTab === 'new' || !currentTab">
+        <div class="form-group">
+          <label class="form-label">Project Name:</label>
+          <input
+            id="input-project-name"
+            type="text"
+            class="form-input"
+            :value="projectName"
+            @input="projectName = $event.target.value"
+            placeholder="e.g. hero_idle"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Pixel Canvas Size:</label>
+          <select
+            id="select-project-size"
+            class="form-select"
+            :value="canvasSize"
+            @change="canvasSize = $event.target.value"
+          >
+            <option
+              :each="p in standardSizes"
+              :key="p.label"
+              :value="`${p.width}x${p.height}`"
+            >{{ p.label }}</option>
+          </select>
+          <span class="form-hint">Starts with 1 initial frame and centered base layer.</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Animation Speed (FPS):</label>
+          <select
+            id="select-project-fps"
+            class="form-select"
+            :value="fps"
+            @change="fps = $event.target.value"
+          >
+            <option value="6">6 FPS (Retro slow)</option>
+            <option value="8">8 FPS (Classic walk)</option>
+            <option value="12">12 FPS (Standard pixel art)</option>
+            <option value="16">16 FPS (Smooth retro)</option>
+            <option value="24">24 FPS (Cinematic)</option>
+          </select>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-create-project" class="btn-primary" @click="handleCreate">
+            ✨ Create Project
+          </button>
+        </div>
+      </div>
+
+      <!-- Open Tab -->
+      <div :else class="open-section">
+        <span class="section-title">Saved in WASMFS</span>
+
+        <div :if="!savedFiles || savedFiles.length === 0" class="empty-file-list">
+          No saved projects found in WASMFS yet.
+        </div>
+        <div :else class="file-list">
+          <div :each="f in savedFiles" :key="f.name" class="file-item">
+            <div class="file-info">
+              <span class="file-name">📄 {{ f.name }}</span>
+              <span class="file-date">{{ formatDate(f.updatedAt) }}</span>
+            </div>
+            <button class="btn-open-file" @click="handleOpen(f.name)">Open</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="external-actions">
+          <button id="btn-open-sample" class="btn-secondary" @click="handleSample">
+            🌟 Open Sample Walk Project
+          </button>
+
+          <label class="btn-secondary file-upload-label">
+            📥 Import JSON File
+            <input id="file-upload-json" type="file" accept=".json" style="display: none;" @change="handleFileInput" />
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

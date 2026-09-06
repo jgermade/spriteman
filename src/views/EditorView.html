@@ -1,0 +1,79 @@
+<script :setup="{
+  hasActiveProject,
+  canvasWidth,
+  canvasHeight,
+  fps,
+  isInstallable,
+  saveButtonText,
+  onSave,
+  onInstall
+}" type="text/typescript">
+  $: sizeBadgeText = `${canvasWidth || 64} × ${canvasHeight || 64} px`;
+  $: fpsBadgeText = `${fps || 12} FPS`;
+  $: currentSaveText = saveButtonText || '💾 Save';
+</script>
+
+<div class="app-container">
+  <!-- Top Application Bar -->
+  <div class="app-topbar">
+    <div class="topbar-left">
+      <div class="app-logo">
+        <img src="./icon-192.svg" class="logo-pixel-img" width="22" height="22" alt="Logo" />
+        <span class="logo-text">Spritemotion</span>
+      </div>
+
+      <!-- Project Tabs Strip -->
+      <div class="tabs-wrapper"></div>
+    </div>
+
+    <div class="topbar-center">
+      <span :if="hasActiveProject" id="topbar-size-badge" class="badge-tag">{{ sizeBadgeText }}</span>
+      <span :if="hasActiveProject" id="topbar-fps-badge" class="badge-tag">{{ fpsBadgeText }}</span>
+    </div>
+
+    <div class="topbar-right">
+      <button
+        :if="hasActiveProject"
+        id="btn-menu-save"
+        class="topbar-btn primary"
+        title="Save Project to WASMFS"
+        @click="onSave?.()"
+      >{{ currentSaveText }}</button>
+      <button
+        :if="isInstallable"
+        id="pwa-install-btn"
+        class="pwa-install-btn"
+        @click="onInstall?.()"
+      >⬇ Install App</button>
+    </div>
+  </div>
+
+  <!-- Welcome Screen (Shown when no project is open) -->
+  <div class="welcome-screen-wrapper" :style="`display: ${hasActiveProject ? 'none' : 'flex'};`"></div>
+
+  <!-- Main Docked Editor Workspace (Hidden when no project is open) -->
+  <div class="app-workspace" :style="`display: ${hasActiveProject ? 'grid' : 'none'};`">
+    <!-- Center Canvas & Bottom Timeline -->
+    <div class="center-workspace">
+      <div class="canvas-viewport-panel">
+        <div class="canvas-stage-wrapper"></div>
+      </div>
+      <div class="timeline-docked-panel">
+        <div class="framestrip-wrapper"></div>
+      </div>
+    </div>
+
+    <!-- Right Side Tools Sidebar -->
+    <div class="sidebar-docked-panel">
+      <div class="sidebar-scrollable">
+        <div class="hierarchy-wrapper"></div>
+        <div class="inspector-wrapper"></div>
+        <div class="palette-wrapper"></div>
+        <div class="settings-wrapper"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Container -->
+  <div class="modal-wrapper"></div>
+</div>

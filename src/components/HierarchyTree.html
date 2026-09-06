@@ -1,0 +1,239 @@
+<script :setup="{
+  layers,
+  selectedLayerId,
+  isPivotMode,
+  onSelectLayer,
+  onAddLayer,
+  onTogglePivotMode,
+  onToggleLayerRelative,
+  onToggleLayerVisibility,
+  onRenameLayer,
+  onDeleteLayer,
+  onReorderLayer
+}" type="text/typescript">
+  let renamingId: string | null = null;
+  let renamingName = '';
+  let draggingId: string | null = null;
+  let dropTargetId: string | null = null;
+  let dropMode: 'before' | 'after' | 'child' | null = null;
+
+  $: validLayers = (layers || []).filter((l: any) => l && typeof l === 'object');
+  $: layerCountText = `${validLayers.length} Layers`;
+
+  const handleSelect = (id: string) => {
+    if (draggingId) return;
+    onSelectLayer?.(id);
+  };
+
+  const startRename = (layer: any) => {
+    renamingId = layer.id;
+    renamingName = layer.name;
+    setTimeout(() => {
+      const input = document.querySelector('.layer-rename-input') as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }, 10);
+  };
+
+  const commitRename = (layer: any) => {
+    if (!renamingId) return;
+    const currentId = renamingId;
+    renamingId = null;
+    const trimmed = renamingName.trim();
+    if (trimmed && trimmed !== layer.name) {
+      onRenameLayer?.(currentId, trimmed);
+    }
+  };
+
+  const cancelRename = () => {
+    renamingId = null;
+    renamingName = '';
+  };
+
+  const handleRenameKeydown = (e: KeyboardEvent, layer: any) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      commitRename(layer);
+    } else if (e.key === 'Escape') {
+      cancelRename();
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    if (validLayers.length > 1) {
+      onDeleteLayer?.(id);
+    }
+  };
+
+  // Drag and Drop
+  const handleDragStart = (e: DragEvent, layer: any) => {
+    if (renamingId) {
+      e.preventDefault();
+      return;
+    }
+    draggingId = layer.id;
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('text/plain', layer.id);
+      e.dataTransfer.effectAllowed = 'move';
+    }
+  };
+
+  const handleDragEnd = () => {
+    draggingId = null;
+    dropTargetId = null;
+    dropMode = null;
+  };
+
+  const handleDragOver = (e: DragEvent, layer: any) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const target = e.currentTarget as HTMLElement;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const relY = (e.clientY - rect.top) / rect.height;
+
+    dropTargetId = layer.id;
+    if (relY < 0.28) {
+      dropMode = 'before';
+    } else if (relY > 0.72) {
+      dropMode = 'after';
+    } else {
+      dropMode = 'child';
+    }
+  };
+
+  const handleDragLeave = (e: DragEvent, layer: any) => {
+    const target = e.currentTarget as HTMLElement;
+    if (target && !target.contains(e.relatedTarget as Node)) {
+      if (dropTargetId === layer.id) {
+        dropTargetId = null;
+        dropMode = null;
+      }
+    }
+  };
+
+  const handleDrop = (e: DragEvent, layer: any) => {
+    e.preventDefault();
+    const fromId = e.dataTransfer?.getData('text/plain') || draggingId;
+    const currentDropMode = dropMode;
+    handleDragEnd();
+
+    if (!fromId || fromId === layer.id) return;
+
+    const fromIndex = validLayers.findIndex((l: any) => l && l.id === fromId);
+    const index = validLayers.findIndex((l: any) => l && l.id === layer.id);
+    if (fromIndex === -1 || index === -1) return;
+
+    let targetIndex: number;
+    let newParentId: string | null = null;
+
+    if (currentDropMode === 'child') {
+      newParentId = layer.id;
+      targetIndex = fromIndex < index ? index : index + 1;
+    } else if (currentDropMode === 'before') {
+      newParentId = layer.parent_id || null;
+      targetIndex = fromIndex < index ? index - 1 : index;
+    } else {
+      newParentId = layer.parent_id || null;
+      targetIndex = fromIndex < index ? index : index + 1;
+    }
+
+    targetIndex = Math.max(0, Math.min(validLayers.length - 1, targetIndex));
+    onReorderLayer?.(fromId, targetIndex, newParentId);
+  };
+</script>
+
+<div class="hierarchy-panel">
+  <div class="panel-header">
+    <span class="panel-title">Layer Hierarchy</span>
+    <span class="badge">{{ layerCountText }}</span>
+  </div>
+
+  <div class="layer-list">
+    <div :each="layer in validLayers" :key="layer.id" class="layer-item" :class="{
+        active: layer.id === selectedLayerId,
+        'is-child': !!layer.parent_id,
+        'is-hidden': layer.visible === false,
+        'is-dragging': draggingId === layer.id,
+        'drop-before': dropTargetId === layer.id && dropMode === 'before',
+        'drop-after': dropTargetId === layer.id && dropMode === 'after',
+        'drop-child': dropTargetId === layer.id && dropMode === 'child'
+      }" :draggable="renamingId !== layer.id" title="Arrastra para reordenar capas o anidar como hija"
+      @click="handleSelect(layer.id)" @dragstart="handleDragStart($event, layer)" @dragend="handleDragEnd()"
+      @dragover="handleDragOver($event, layer)" @dragleave="handleDragLeave($event, layer)"
+      @drop="handleDrop($event, layer)">
+      <div class="layer-title-group">
+        <button class="btn-layer-action btn-layer-visibility"
+          :class="{ 'is-visible': layer.visible !== false, 'is-hidden': layer.visible === false }"
+          :title="layer.visible !== false ? 'Ocultar capa' : 'Mostrar capa'"
+          @click.stop="onToggleLayerVisibility?.(layer.id)">
+          <svg :if="layer.visible !== false" width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+            <circle cx="12" cy="12" r="3"></circle>
+          </svg>
+          <svg :else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path
+              d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24">
+            </path>
+            <line x1="1" y1="1" x2="23" y2="23"></line>
+          </svg>
+        </button>
+
+        <span class="layer-drag-handle" title="Arrastrar para reordenar">⋮⋮</span>
+
+        <span class="layer-name-container">
+          <span :if="!!layer.parent_id" class="layer-child-arrow">↳</span>
+          <span :if="renamingId !== layer.id" class="layer-name" title="Doble clic para renombrar"
+            @dblclick.stop="startRename(layer)">{{ layer.name }}</span>
+          <input :else type="text" class="layer-rename-input" :value="renamingName"
+            @input="renamingName = $event.target.value" @blur="commitRename(layer)"
+            @keydown="handleRenameKeydown($event, layer)" @click.stop />
+        </span>
+      </div>
+
+      <div class="layer-actions">
+        <button :if="!!layer.parent_id" class="btn-layer-action btn-relative-toggle"
+          :class="{ 'rel-parent': layer.relative_to_parent !== false, 'free-movement': layer.relative_to_parent === false }"
+          :title="layer.relative_to_parent !== false ? 'Movimiento relativo al padre (clic para movimiento libre)' : 'Movimiento libre (clic para relativo al padre)'"
+          @click.stop="onToggleLayerRelative?.(layer.id)">
+          <svg :if="layer.relative_to_parent !== false" width="13" height="13" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+          </svg>
+          <svg :else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="5 9 2 12 5 15"></polyline>
+            <polyline points="9 5 12 2 15 5"></polyline>
+            <polyline points="15 19 12 22 9 19"></polyline>
+            <polyline points="19 9 22 12 19 15"></polyline>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <line x1="12" y1="2" x2="12" y2="22"></line>
+          </svg>
+        </button>
+
+        <button class="btn-layer-action btn-layer-delete" :class="{ disabled: validLayers.length <= 1 }"
+          :style="validLayers.length <= 1 ? 'opacity: 0.3; cursor: not-allowed;' : ''" title="Borrar capa"
+          @click.stop="handleDelete(layer.id)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"></path>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+
+        <span class="layer-z">Z:{{ layer.z_index }}</span>
+      </div>
+    </div>
+
+    <!-- Add Layer placeholder at bottom -->
+    <button class="layer-item new" title="Añadir nueva capa" @click="onAddLayer?.()">
+      <span class="layer-new-icon">+</span>
+      <span class="layer-new-text">Añadir Capa</span>
+    </button>
+  </div>
+</div>
