@@ -1,16 +1,782 @@
-<script :setup="{
-  hasActiveProject,
-  canvasWidth,
-  canvasHeight,
-  fps,
-  isInstallable,
-  saveButtonText,
-  onSave,
-  onInstall
-}" type="text/typescript">
+<script :setup type="text/typescript">
+  const _d = (m: any) => m?.default ?? m;
+
+  const { animationService } = await import('../services/animation.service');
+  const { projectService } = await import('../services/project.service');
+  const { pwaService } = await import('../services/pwa.service');
+  const { storageService } = await import('../services/storage.service');
+  const { tabsService } = await import('../services/tabs.service');
+  const { canvasService } = await import('../services/canvas.service');
+
+  const CanvasStageComponent = _d(await import('../components/CanvasStage.html'));
+  const FrameStripComponent = _d(await import('../components/FrameStrip.html'));
+  const HierarchyTreeComponent = _d(await import('../components/HierarchyTree.html'));
+  const PixelPaletteComponent = _d(await import('../components/PixelPalette.html'));
+  const AnimationSettingsComponent = _d(await import('../components/AnimationSettings.html'));
+  const InspectorPanelComponent = _d(await import('../components/InspectorPanel.html'));
+  const ProjectModalComponent = _d(await import('../components/ProjectModal.html'));
+  const ProjectTabsComponent = _d(await import('../components/ProjectTabs.html'));
+  const WelcomeScreenComponent = _d(await import('../components/WelcomeScreen.html'));
+
+  const { STANDARD_PIXEL_SIZES, PIXEL_ART_PALETTE } = await import('../helpers/palette.helper');
+  const { formatMatrix } = await import('../helpers/format.helper');
+
+  let hasActiveProject = false;
+  let canvasWidth = 64;
+  let canvasHeight = 64;
+  let fps = 12;
+  let isInstallable = pwaService.getState().isInstallable;
+  let saveButtonText = '💾 Save';
+
   $: sizeBadgeText = `${canvasWidth || 64} × ${canvasHeight || 64} px`;
   $: fpsBadgeText = `${fps || 12} FPS`;
   $: currentSaveText = saveButtonText || '💾 Save';
+
+  let canvasStage: any;
+  let frameStrip: any;
+  let hierarchyTree: any;
+  let pixelPalette: any;
+  let animationSettings: any;
+  let inspectorPanel: any;
+  let projectModal: any;
+  let projectTabs: any;
+  let welcomeScreen: any;
+
+  let currentZoom = 6;
+  let activeProjectName = '';
+  let isTempSwapped = false;
+
+  const syncPivotState = () => {
+    const isPivot = canvasService.isPivotMode();
+    const currentInt = Math.round(animationService.getState().currentFrame);
+    const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+
+    if (activeGroup && isPivot) {
+      const proj = projectService.getState();
+      const p = activeGroup.pivot ?? {
+        x: Math.round(proj.meta.canvas_width / 2),
+        y: Math.round(proj.meta.canvas_height / 2),
+      };
+      canvasService.setPivot(p);
+    } else {
+      if (isPivot && !activeGroup) {
+        canvasService.setPivotMode(false);
+        if (frameStrip?.data) frameStrip.data.isPivotMode = false;
+      }
+      canvasService.setPivot(null);
+    }
+  };
+
+  const handleInstall = () => {
+    pwaService.promptInstall();
+  };
+
+  const handleUndo = () => {
+    if (projectService.undo()) {
+      const raw = projectService.getRawJson();
+      animationService.reloadProject(raw);
+      const totalFrames = projectService.getState().meta.total_frames;
+      const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
+      animationService.seek(curF);
+      saveCurrentProject();
+    }
+  };
+
+  const handleRedo = () => {
+    if (projectService.redo()) {
+      const raw = projectService.getRawJson();
+      animationService.reloadProject(raw);
+      const totalFrames = projectService.getState().meta.total_frames;
+      const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
+      animationService.seek(curF);
+      saveCurrentProject();
+    }
+  };
+
+  const swapPaletteColors = () => {
+    if (!pixelPalette?.data) return;
+    const temp = pixelPalette.data.primaryColor;
+    pixelPalette.data.primaryColor = pixelPalette.data.secondaryColor;
+    pixelPalette.data.secondaryColor = temp;
+    canvasService.setColors(pixelPalette.data.primaryColor, pixelPalette.data.secondaryColor);
+  };
+
+  const saveCurrentProject = async (): Promise<void> => {
+    if (!activeProjectName) return;
+    const json = projectService.getRawJson();
+    await storageService.saveFile(activeProjectName, json);
+
+    saveButtonText = '✓ Saved!';
+    setTimeout(() => {
+      saveButtonText = '💾 Save';
+    }, 1200);
+  };
+
+  const loadActiveProject = async (projectName: string): Promise<void> => {
+    activeProjectName = projectName;
+    let json = await storageService.readFile(projectName);
+
+    if (!json) {
+      if (projectName === 'sample_walk') {
+        json = await fetch('./examples/sample_walk.json').then((r) => r.text());
+        await storageService.saveFile(projectName, json);
+      } else {
+        // Create fallback project with 1 frame
+        json = projectService.createNewProject(projectName, 64, 64, 128);
+        await storageService.saveFile(projectName, json);
+      }
+    }
+
+    projectService.setProjectJson(json);
+    await animationService.reloadProject(json);
+    animationService.seek(0);
+    syncPivotState();
+  };
+
+  const handleCreateProject = async (name: string, w: number, h: number, fpsVal: number): Promise<void> => {
+    const slug = name.trim().replace(/\s+/g, '_') || 'sprite_character';
+    const json = projectService.createNewProject(slug, w, h, fpsVal);
+    await storageService.saveFile(slug, json);
+
+    // Open tab (adds tab, marks active, updates URL hash, displays editor)
+    tabsService.openTab(slug);
+  };
+
+  const handleOpenProject = async (filename: string): Promise<void> => {
+    const slug = filename.replace('.json', '');
+    tabsService.openTab(slug);
+  };
+
+  const handleOpenSample = async (): Promise<void> => {
+    tabsService.openTab('sample_walk');
+  };
+
+  const handleImportJson = async (json: string): Promise<void> => {
+    let name = 'imported_sprite';
+    try {
+      const parsed = JSON.parse(json);
+      if (parsed.meta?.name) name = parsed.meta.name.replace(/\s+/g, '_');
+    } catch {}
+
+    await storageService.saveFile(name, json);
+    tabsService.openTab(name);
+  };
+
+  const applyTabsState = async (state: any): Promise<void> => {
+    if (projectTabs?.data) {
+      projectTabs.data.tabs = state.tabs;
+      projectTabs.data.activeTab = state.activeTab;
+    }
+
+    const hasProject = state.tabs.length > 0 && !!state.activeTab;
+    const projState = projectService.getState();
+
+    hasActiveProject = hasProject;
+    canvasWidth = projState.meta.canvas_width;
+    canvasHeight = projState.meta.canvas_height;
+    fps = projState.meta.fps;
+
+    if (!hasProject) {
+      animationService.pause();
+      const files = await storageService.listFiles();
+      if (welcomeScreen?.data) welcomeScreen.data.savedFiles = files;
+      syncPivotState();
+      return;
+    }
+
+    // Load active tab content from WASMFS
+    await loadActiveProject(state.activeTab);
+  };
+
+  const bindServices = () => {
+    // 1. Tabs service synchronization
+    tabsService.subscribe((state: any) => {
+      applyTabsState(state);
+    });
+
+    // 2. Animation service updates
+    animationService.subscribe((animState: any) => {
+      const proj = projectService.getState();
+      const currentInt = Math.round(animState.currentFrame);
+      const activeLayer = proj.layers.find((l: any) => l.id === proj.selectedLayerId);
+      const layerGroups = activeLayer?.groups || [];
+      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+      const isPivot = canvasService.isPivotMode();
+
+      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
+
+      if (frameStrip?.data) {
+        frameStrip.data.currentFrame = animState.currentFrame;
+        frameStrip.data.totalFrames = animState.totalFrames;
+        frameStrip.data.isPlaying = animState.isPlaying;
+        frameStrip.data.framePixels = proj.frame_pixels;
+        frameStrip.data.spriteWidth = proj.meta.canvas_width;
+        frameStrip.data.spriteHeight = proj.meta.canvas_height;
+        frameStrip.data.animations = proj.animations;
+        frameStrip.data.activeAnimationId = proj.activeAnimationId;
+        frameStrip.data.layerGroups = layerGroups;
+        frameStrip.data.activeGroup = activeGroup;
+        frameStrip.data.isPivotMode = isPivot;
+        frameStrip.data.canUndo = projectService.canUndo();
+        frameStrip.data.canRedo = projectService.canRedo();
+      }
+
+      const currentPixels = projectService.getFramePixels(currentInt);
+      const prevInt = Math.max(0, currentInt - 1);
+      const onionPixels = animState.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
+      const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
+      canvasService.setFramePixels(currentPixels, onionPixels, movingPixels);
+
+      syncPivotState();
+
+      if (animState.resolvedFrame) {
+        const selectedId = proj.selectedLayerId;
+        const onionItems = animState.onionSkinFrame?.items ?? null;
+        canvasService.render(animState.resolvedFrame.items, selectedId, onionItems);
+
+        const selectedItem = animState.resolvedFrame.items.find((i: any) => i.layer_id === selectedId);
+        if (inspectorPanel?.data) {
+          inspectorPanel.data.item = selectedItem || null;
+          inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
+        }
+      }
+    });
+
+    // 3. Project service updates
+    projectService.subscribe((projState: any) => {
+      const isPivot = canvasService.isPivotMode();
+      if (hierarchyTree?.data) {
+        hierarchyTree.data.layers = [...projState.layers];
+        hierarchyTree.data.selectedLayerId = projState.selectedLayerId;
+        hierarchyTree.data.isPivotMode = isPivot;
+      }
+
+      const anim = animationService.getState();
+      const currentInt = Math.round(anim.currentFrame);
+      const activeLayer = (projState.layers || []).find((l: any) => l && l.id === projState.selectedLayerId);
+      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
+      const layerGroups = activeLayer?.groups || [];
+      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+
+      syncPivotState();
+
+      canvasWidth = projState.meta.canvas_width;
+      canvasHeight = projState.meta.canvas_height;
+      fps = projState.meta.fps;
+
+      canvasService.setCanvasSize(projState.meta.canvas_width, projState.meta.canvas_height);
+      if (animationSettings?.data) {
+        animationSettings.data.width = projState.meta.canvas_width;
+        animationSettings.data.height = projState.meta.canvas_height;
+        animationSettings.data.fps = projState.meta.fps;
+        animationSettings.data.zoom = currentZoom;
+      }
+
+      const currentPixels = projectService.getFramePixels(currentInt);
+      const prevInt = Math.max(0, currentInt - 1);
+      const onionPixels = anim.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
+      const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
+      canvasService.setFramePixels(currentPixels, onionPixels, movingPixels);
+
+      if (frameStrip?.data) {
+        frameStrip.data.currentFrame = anim.currentFrame;
+        frameStrip.data.totalFrames = projState.meta.total_frames;
+        frameStrip.data.isPlaying = anim.isPlaying;
+        frameStrip.data.framePixels = projState.frame_pixels;
+        frameStrip.data.spriteWidth = projState.meta.canvas_width;
+        frameStrip.data.spriteHeight = projState.meta.canvas_height;
+        frameStrip.data.animations = projState.animations;
+        frameStrip.data.activeAnimationId = projState.activeAnimationId;
+        frameStrip.data.layerGroups = layerGroups;
+        frameStrip.data.activeGroup = activeGroup;
+        frameStrip.data.isPivotMode = isPivot;
+        frameStrip.data.canUndo = projectService.canUndo();
+        frameStrip.data.canRedo = projectService.canRedo();
+      }
+
+      if (anim.resolvedFrame) {
+        const selectedItem = anim.resolvedFrame.items.find((i: any) => i.layer_id === projState.selectedLayerId);
+        if (inspectorPanel?.data) {
+          inspectorPanel.data.item = selectedItem || null;
+          inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
+        }
+        canvasService.render(anim.resolvedFrame.items, projState.selectedLayerId, anim.onionSkinFrame?.items);
+      }
+    });
+
+    // 4. PWA state updates
+    pwaService.subscribe((pwa: any) => {
+      isInstallable = pwa.isInstallable;
+    });
+  };
+
+  const initKeyboardShortcuts = () => {
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      // Don't intercept when user is typing in inputs or textareas
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.classList.contains('layer-rename-input'))
+      ) {
+        return;
+      }
+
+      // Check if project is open
+      const hasProject = tabsService.getState().tabs.length > 0 && !!tabsService.getState().activeTab;
+      if (!hasProject) return;
+
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+
+      // Undo / Redo: Cmd+Z, Cmd+Shift+Z, Cmd+Y
+      if (isCmdOrCtrl) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            handleRedo();
+          } else {
+            handleUndo();
+          }
+          return;
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          handleRedo();
+          return;
+        }
+      }
+
+      // Add frame hotkey: '+' or '=' (with or without shift, or numpad +)
+      if ((e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !isCmdOrCtrl && !e.altKey) {
+        e.preventDefault();
+        const newIdx = projectService.addFrame(true);
+        animationService.reloadProject(projectService.getRawJson());
+        animationService.seek(newIdx);
+        saveCurrentProject();
+        return;
+      }
+
+      // Palette color swap shortcuts: X or temporary swap with Cmd/Alt
+      if (e.key === 'x' || e.key === 'X') {
+        swapPaletteColors();
+        return;
+      }
+
+      if ((e.key === 'Meta' || e.key === 'Alt') && !isTempSwapped) {
+        isTempSwapped = true;
+        swapPaletteColors();
+        if (pixelPalette?.data) pixelPalette.data.isTempSwapped = true;
+      }
+    });
+
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      if (isTempSwapped && (e.key === 'Meta' || e.key === 'Alt') && !e.metaKey && !e.altKey) {
+        isTempSwapped = false;
+        swapPaletteColors();
+        if (pixelPalette?.data) pixelPalette.data.isTempSwapped = false;
+      }
+    });
+
+    window.addEventListener('blur', () => {
+      if (isTempSwapped) {
+        isTempSwapped = false;
+        swapPaletteColors();
+        if (pixelPalette?.data) pixelPalette.data.isTempSwapped = false;
+      }
+    });
+  };
+
+  const initAppFlow = async (): Promise<void> => {
+    // 1. Ensure sample project is stored in WASMFS if first time
+    const files = await storageService.listFiles();
+    if (files.length === 0) {
+      try {
+        const sampleText = await fetch('./examples/sample_walk.json').then((r) => r.text());
+        await storageService.saveFile('sample_walk', sampleText);
+      } catch {}
+    }
+
+    // Refresh file list in welcome and modal
+    const updatedFiles = await storageService.listFiles();
+    if (welcomeScreen?.data) welcomeScreen.data.savedFiles = updatedFiles;
+    if (projectModal?.data) projectModal.data.savedFiles = updatedFiles;
+
+    // 2. Read tabs from URL hash: #tabs=<id1>,#<active>,<id2>
+    const initialTabsState = tabsService.getState();
+    await applyTabsState(initialTabsState);
+  };
+
+  // Lifecycle: Wait for component template to be mounted in DOM
+  await $mounted();
+
+  const root = document.querySelector('.app-container') || document.body;
+
+  // Mount CanvasStage Component
+  canvasStage = CanvasStageComponent.mount(root.querySelector('.canvas-stage-wrapper'), {
+    canvasService,
+    onPaintStroke: (pixels: any, color: string) => {
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      const group = projectService.getActiveLayerGroupForFrame(currentInt);
+      if (group && currentInt > group.start_frame && currentInt < group.end_frame) {
+        return;
+      }
+      const selectedId = projectService.getState().selectedLayerId;
+      if (color === '__eraser__') {
+        projectService.erasePixels(currentInt, pixels, selectedId);
+      } else {
+        projectService.setPixels(currentInt, pixels, color, selectedId);
+      }
+      saveCurrentProject();
+    },
+    onSetPivot: (x: number, y: number) => {
+      const proj = projectService.getState();
+      const selectedId = proj.selectedLayerId;
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      if (selectedId) {
+        const group = projectService.getActiveLayerGroupForFrame(currentInt);
+        if (group) {
+          projectService.setGroupPivot(selectedId, group.id, x, y);
+          canvasService.setPivot({ x, y });
+        }
+        saveCurrentProject();
+      }
+    },
+    onStartTranslateLayer: () => {
+      const proj = projectService.getState();
+      const selectedId = proj.selectedLayerId;
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      if (selectedId) {
+        projectService.startLayerTranslation(selectedId, currentInt);
+      }
+    },
+    onTranslateLayer: (deltaX: number, deltaY: number, isFinal: boolean = true) => {
+      const proj = projectService.getState();
+      const selectedId = proj.selectedLayerId;
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      if (selectedId) {
+        projectService.translateLayer(selectedId, deltaX, deltaY, currentInt, isFinal);
+        const movingPixels = isFinal ? projectService.getActiveLayerMovingPixels(currentInt) : null;
+        canvasService.setFramePixels(projectService.getFramePixels(currentInt), null, movingPixels);
+        if (isFinal) {
+          animationService.reloadProject(projectService.getRawJson());
+          saveCurrentProject();
+        }
+      }
+    },
+    onStartMovePixel: (x: number, y: number) => {
+      const proj = projectService.getState();
+      const selectedId = proj.selectedLayerId;
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      if (selectedId) {
+        projectService.startPixelMove(selectedId, currentInt, x, y);
+      }
+    },
+    onMovePixel: (fromX: number, fromY: number, toX: number, toY: number, isFinal: boolean = true) => {
+      const proj = projectService.getState();
+      const selectedId = proj.selectedLayerId;
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      if (selectedId) {
+        projectService.movePixel(selectedId, currentInt, fromX, fromY, toX, toY, isFinal);
+        const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
+        canvasService.setFramePixels(projectService.getFramePixels(currentInt), null, movingPixels);
+        if (isFinal) {
+          animationService.reloadProject(projectService.getRawJson());
+          saveCurrentProject();
+        }
+      }
+    },
+    onZoomChange: (zoomVal: number) => {
+      currentZoom = zoomVal;
+      if (animationSettings?.data) {
+        animationSettings.data.zoom = zoomVal;
+      }
+    },
+  });
+
+  // Mount other child components
+  projectTabs = ProjectTabsComponent.mount(root.querySelector('.tabs-wrapper'), {
+    tabs: [],
+    activeTab: null,
+    onSelectTab: (tabId: string) => tabsService.selectTab(tabId),
+    onCloseTab: (tabId: string) => tabsService.closeTab(tabId),
+    onNewTab: async () => {
+      const files = await storageService.listFiles();
+      if (projectModal?.data) {
+        projectModal.data.savedFiles = files;
+        projectModal.data.currentTab = 'new';
+        projectModal.data.isOpen = true;
+      }
+    },
+  });
+
+  welcomeScreen = WelcomeScreenComponent.mount(root.querySelector('.welcome-screen-wrapper'), {
+    savedFiles: [],
+    sizes: STANDARD_PIXEL_SIZES,
+    onCreateProject: (name: string, w: number, h: number, fpsVal: number) => handleCreateProject(name, w, h, fpsVal),
+    onOpenProject: (filename: string) => handleOpenProject(filename),
+    onOpenSample: () => handleOpenSample(),
+    onImportJson: (json: string) => handleImportJson(json),
+  });
+
+  hierarchyTree = HierarchyTreeComponent.mount(root.querySelector('.hierarchy-wrapper'), {
+    layers: [],
+    selectedLayerId: null,
+    isPivotMode: false,
+    onSelectLayer: (layerId: string) => {
+      projectService.selectLayer(layerId);
+      syncPivotState();
+    },
+    onAddLayer: () => {
+      projectService.addLayer();
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onToggleLayerRelative: (layerId: string) => {
+      projectService.toggleLayerRelative(layerId);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onToggleLayerVisibility: (layerId: string) => {
+      projectService.toggleLayerVisibility(layerId);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onRenameLayer: (layerId: string, name: string) => {
+      projectService.renameLayer(layerId, name);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onDeleteLayer: (layerId: string) => {
+      if (projectService.deleteLayer(layerId)) {
+        animationService.reloadProject(projectService.getRawJson());
+        saveCurrentProject();
+      }
+    },
+    onTogglePivotMode: () => {
+      // Legacy HierarchyTree pivot toggle no longer used
+    },
+    onReorderLayer: (layerId: string, targetIndex: number, newParentId: string | null) => {
+      projectService.reorderLayer(layerId, targetIndex, newParentId);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onMoveLayerUp: (layerId: string) => {
+      projectService.moveLayerUp(layerId);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onMoveLayerDown: (layerId: string) => {
+      projectService.moveLayerDown(layerId);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+  });
+
+  frameStrip = FrameStripComponent.mount(root.querySelector('.framestrip-wrapper'), {
+    totalFrames: 1,
+    currentFrame: 0,
+    isPlaying: false,
+    onionSkin: true,
+    spriteWidth: 64,
+    spriteHeight: 64,
+    framePixels: {},
+    animations: [],
+    activeAnimationId: '',
+    layerGroups: [],
+    activeGroup: null,
+    isPivotMode: false,
+    canUndo: false,
+    canRedo: false,
+    onTogglePlay: () => animationService.togglePlay(),
+    onSelectFrame: (idx: number) => {
+      animationService.pause();
+      animationService.seek(idx);
+      syncPivotState();
+    },
+    onSelectRange: (start: number, end: number) => {},
+    onStep: (delta: number) => {
+      animationService.step(delta);
+      syncPivotState();
+    },
+    onAddFrame: (targetIndex?: number) => {
+      const newIdx = typeof targetIndex === 'number'
+        ? projectService.insertFrame(targetIndex, true)
+        : projectService.addFrame(true);
+      animationService.reloadProject(projectService.getRawJson());
+      animationService.seek(newIdx);
+      saveCurrentProject();
+    },
+    onReorderFrame: (from: number, to: number) => {
+      projectService.reorderFrame(from, to);
+      animationService.reloadProject(projectService.getRawJson());
+      animationService.seek(to);
+      saveCurrentProject();
+    },
+    onDuplicateFrame: () => {
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      const newIdx = projectService.duplicateFrame(currentInt);
+      animationService.reloadProject(projectService.getRawJson());
+      animationService.seek(newIdx);
+      saveCurrentProject();
+    },
+    onDeleteFrame: () => {
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      projectService.deleteFrame(currentInt);
+      animationService.reloadProject(projectService.getRawJson());
+      const nextInt = Math.max(0, currentInt - 1);
+      animationService.seek(nextInt);
+      saveCurrentProject();
+    },
+    onToggleOnionSkin: (enabled: boolean) => animationService.setOnionSkinEnabled(enabled),
+    onGroupFrames: (start: number, end: number) => {
+      const selectedId = projectService.getState().selectedLayerId;
+      if (selectedId) {
+        projectService.createFrameGroup(selectedId, start, end);
+        animationService.reloadProject(projectService.getRawJson());
+        saveCurrentProject();
+        syncPivotState();
+      }
+    },
+    onUngroupFrames: (groupId: string) => {
+      const selectedId = projectService.getState().selectedLayerId;
+      if (selectedId) {
+        projectService.deleteFrameGroup(selectedId, groupId);
+        animationService.reloadProject(projectService.getRawJson());
+        saveCurrentProject();
+        syncPivotState();
+      }
+    },
+    onToggleGroupPivotMode: () => {
+      const currentInt = Math.round(animationService.getState().currentFrame);
+      const group = projectService.getActiveLayerGroupForFrame(currentInt);
+      if (!group) return;
+
+      const next = !canvasService.isPivotMode();
+      canvasService.setPivotMode(next);
+      if (frameStrip?.data) frameStrip.data.isPivotMode = next;
+      syncPivotState();
+    },
+    onSelectAnimation: (animId: string) => {
+      projectService.selectAnimation(animId);
+      animationService.reloadProject(projectService.getRawJson());
+      animationService.seek(0);
+      saveCurrentProject();
+      syncPivotState();
+    },
+    onAddAnimation: () => {
+      const name = prompt('Nombre de la nueva animación (ej. walk, attack, jump):', 'walk');
+      if (name !== null) {
+        projectService.addAnimation(name.trim() || undefined);
+        animationService.reloadProject(projectService.getRawJson());
+        animationService.seek(0);
+        saveCurrentProject();
+        syncPivotState();
+      }
+    },
+    onRenameAnimation: (animId: string, name: string) => {
+      projectService.renameAnimation(animId, name);
+      saveCurrentProject();
+    },
+    onDeleteAnimation: (animId: string) => {
+      projectService.deleteAnimation(animId);
+      animationService.reloadProject(projectService.getRawJson());
+      animationService.seek(0);
+      saveCurrentProject();
+      syncPivotState();
+    },
+    onUndo: () => handleUndo(),
+    onRedo: () => handleRedo(),
+  });
+
+  inspectorPanel = InspectorPanelComponent.mount(root.querySelector('.inspector-wrapper'), {
+    item: null,
+    matrixText: '',
+  });
+
+  pixelPalette = PixelPaletteComponent.mount(root.querySelector('.palette-wrapper'), {
+    primaryColor: '#000000',
+    secondaryColor: '#ffffff',
+    isTempSwapped: false,
+    palette: PIXEL_ART_PALETTE,
+    onSelectPrimary: (color: string) => {
+      if (pixelPalette?.data) {
+        pixelPalette.data.primaryColor = color;
+      }
+      canvasService.setPrimaryColor(color);
+    },
+    onSelectSecondary: (color: string) => {
+      if (pixelPalette?.data) {
+        pixelPalette.data.secondaryColor = color;
+      }
+      canvasService.setSecondaryColor(color);
+    },
+    onSelectColors: (primary: string, secondary: string) => {
+      if (pixelPalette?.data) {
+        pixelPalette.data.primaryColor = primary;
+        pixelPalette.data.secondaryColor = secondary;
+      }
+      canvasService.setColors(primary, secondary);
+    },
+    onSwapColors: () => {
+      swapPaletteColors();
+    },
+  });
+
+  animationSettings = AnimationSettingsComponent.mount(root.querySelector('.settings-wrapper'), {
+    width: 64,
+    height: 64,
+    fps: 12,
+    zoom: currentZoom,
+    sizes: STANDARD_PIXEL_SIZES,
+    onChangeCanvasSize: (w: number, h: number) => {
+      projectService.setCanvasSize(w, h);
+      canvasService.setCanvasSize(w, h);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onChangeFps: (fpsVal: number) => {
+      projectService.setFps(fpsVal);
+      animationService.setFps(fpsVal);
+      animationService.reloadProject(projectService.getRawJson());
+      saveCurrentProject();
+    },
+    onChangeZoom: (zoomVal: number) => {
+      currentZoom = zoomVal;
+      canvasService.setZoom(zoomVal);
+    },
+  });
+
+  projectModal = ProjectModalComponent.mount(root.querySelector('.modal-wrapper'), {
+    isOpen: false,
+    currentTab: 'new',
+    savedFiles: [],
+    sizes: STANDARD_PIXEL_SIZES,
+    onCreate: (name: string, w: number, h: number, fpsVal: number) => {
+      handleCreateProject(name, w, h, fpsVal);
+      if (projectModal?.data) projectModal.data.isOpen = false;
+    },
+    onOpen: (filename: string) => {
+      handleOpenProject(filename);
+      if (projectModal?.data) projectModal.data.isOpen = false;
+    },
+    onLoadSample: () => {
+      handleOpenSample();
+      if (projectModal?.data) projectModal.data.isOpen = false;
+    },
+    onImportJson: (json: string) => {
+      handleImportJson(json);
+      if (projectModal?.data) projectModal.data.isOpen = false;
+    },
+    onClose: () => {
+      if (projectModal?.data) projectModal.data.isOpen = false;
+    },
+  });
+
+  bindServices();
+  initKeyboardShortcuts();
+  await initAppFlow();
 </script>
 
 <div class="app-container">
@@ -37,13 +803,13 @@
         id="btn-menu-save"
         class="topbar-btn primary"
         title="Save Project to WASMFS"
-        @click="onSave?.()"
+        @click="saveCurrentProject()"
       >{{ currentSaveText }}</button>
       <button
         :if="isInstallable"
         id="pwa-install-btn"
         class="pwa-install-btn"
-        @click="onInstall?.()"
+        @click="handleInstall()"
       >⬇ Install App</button>
     </div>
   </div>

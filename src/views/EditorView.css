@@ -1,0 +1,121 @@
+    /* Full Desktop App Container */
+    .app-container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Topbar Application Menu */
+    .app-topbar {
+      height: var(--topbar-height);
+      min-height: var(--topbar-height);
+      background: var(--panel);
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 0.75rem;
+      z-index: 40;
+    }
+
+    .topbar-left, .topbar-center, .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .app-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-right: 0.5rem;
+    }
+
+    .logo-pixel-img {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      border-radius: 4px;
+    }
+
+    .logo-text {
+      font-weight: 700;
+      font-size: 0.9rem;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+
+    /* Main Docked Workspace */
+    .app-workspace {
+      flex: 1;
+      display: grid;
+      grid-template-columns: 1fr var(--sidebar-width);
+      overflow: hidden;
+      height: calc(100vh - var(--topbar-height));
+    }
+
+    .center-workspace {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border-right: 1px solid var(--panel-border);
+    }
+
+    .timeline-docked-panel {
+      height: auto;
+      min-height: 168px;
+      max-height: 48vh;
+      flex-shrink: 0;
+      border-top: 1px solid var(--panel-border);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    .sidebar-docked-panel {
+      width: var(--sidebar-width);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-scrollable {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0.65rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.65rem;
+      scrollbar-width: thin;
+      scrollbar-color: #223247 transparent;
+    }
+
+    .hierarchy-panel, .inspector-panel, .palette-panel, .settings-panel {
+      background: var(--panel-alt);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      padding: 0.85rem;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+    }
+
+    .panel-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #e2e8f0;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+

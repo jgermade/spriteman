@@ -9,7 +9,9 @@
   onToggleLayerVisibility,
   onRenameLayer,
   onDeleteLayer,
-  onReorderLayer
+  onReorderLayer,
+  onMoveLayerUp,
+  onMoveLayerDown
 }" type="text/typescript">
   let renamingId: string | null = null;
   let renamingName = '';
@@ -117,14 +119,19 @@
   const handleDrop = (e: DragEvent, layer: any) => {
     e.preventDefault();
     const fromId = e.dataTransfer?.getData('text/plain') || draggingId;
-    const currentDropMode = dropMode;
-    handleDragEnd();
+    const currentDropMode = dropMode || 'after';
 
-    if (!fromId || fromId === layer.id) return;
+    if (!fromId || fromId === layer.id) {
+      handleDragEnd();
+      return;
+    }
 
     const fromIndex = validLayers.findIndex((l: any) => l && l.id === fromId);
     const index = validLayers.findIndex((l: any) => l && l.id === layer.id);
-    if (fromIndex === -1 || index === -1) return;
+    if (fromIndex === -1 || index === -1) {
+      handleDragEnd();
+      return;
+    }
 
     let targetIndex: number;
     let newParentId: string | null = null;
@@ -140,6 +147,7 @@
       targetIndex = fromIndex < index ? index : index + 1;
     }
 
+    handleDragEnd();
     targetIndex = Math.max(0, Math.min(validLayers.length - 1, targetIndex));
     onReorderLayer?.(fromId, targetIndex, newParentId);
   };
@@ -213,6 +221,20 @@
             <polyline points="19 9 22 12 19 15"></polyline>
             <line x1="2" y1="12" x2="22" y2="12"></line>
             <line x1="12" y1="2" x2="12" y2="22"></line>
+          </svg>
+        </button>
+
+        <button class="btn-layer-action btn-layer-move-up" title="Mover capa arriba (subir z-index)"
+          @click.stop="onMoveLayerUp?.(layer.id)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+
+        <button class="btn-layer-action btn-layer-move-down" title="Mover capa abajo (bajar z-index)"
+          @click.stop="onMoveLayerDown?.(layer.id)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
           </svg>
         </button>
 

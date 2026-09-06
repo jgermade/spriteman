@@ -1,0 +1,29 @@
+    /* Settings Panel */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+
+    .setting-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+    }
+
+    .setting-label {
+      color: var(--text-muted);
+    }
+
+    .setting-select {
+      background: #0a0f16;
+      color: #e2e8f0;
+      border: 1px solid #253449;
+      padding: 0.28rem 0.55rem;
+      border-radius: 5px;
+      font-family: inherit;
+      font-size: 0.76rem;
+      cursor: pointer;
+    }
+

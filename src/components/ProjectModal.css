@@ -1,0 +1,194 @@
+    /* Project Modal */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+
+    .modal-dialog {
+      background: var(--panel);
+      border: 1px solid #2e415e;
+      border-radius: 12px;
+      width: 480px;
+      max-width: 90vw;
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+    }
+
+    .modal-header {
+      background: #0c121b;
+      border-bottom: 1px solid var(--panel-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.6rem 1rem;
+    }
+
+    .modal-tabs {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .modal-tab {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      padding: 0.35rem 0.7rem;
+      border-radius: 5px;
+    }
+
+    .modal-tab:hover {
+      color: #fff;
+      background: #192433;
+    }
+
+    .modal-tab.active {
+      color: var(--accent);
+      background: rgba(56, 189, 248, 0.12);
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      cursor: pointer;
+      padding: 0.2rem 0.5rem;
+    }
+
+    .modal-body {
+      padding: 1.25rem;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      margin-bottom: 1rem;
+    }
+
+    .form-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .form-input, .form-select {
+      background: #080c14;
+      border: 1px solid #24354c;
+      border-radius: 6px;
+      color: #fff;
+      padding: 0.5rem 0.75rem;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+
+    .form-input:focus, .form-select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .form-hint {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 1.25rem;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      border: 1px solid #38bdf8;
+      color: white;
+      padding: 0.55rem 1.25rem;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.35);
+    }
+
+    .btn-secondary {
+      background: #172230;
+      border: 1px solid #2b3e58;
+      color: #e2e8f0;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      max-height: 180px;
+      overflow-y: auto;
+      margin-bottom: 1rem;
+    }
+
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #090d14;
+      padding: 0.5rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid #1a2536;
+    }
+
+    .file-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: #e2e8f0;
+    }
+
+    .file-date {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-left: 0.6rem;
+    }
+
+    .btn-open-file {
+      background: #0284c7;
+      border: none;
+      color: white;
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--panel-border);
+      margin: 1rem 0;
+    }
+
+    .external-actions {
+      display: flex;
+      gap: 0.6rem;
+    }
+
+    .empty-file-list {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 1.5rem 0;
+    }

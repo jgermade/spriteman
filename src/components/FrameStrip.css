@@ -1,0 +1,513 @@
+    /* FrameStrip Component - Auto-growing container */
+    .framestrip-container {
+      min-height: 100%;
+      height: auto;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 0.65rem;
+      padding: 0.65rem 0.85rem;
+    }
+
+    /* Animation Clips Tabs Strip */
+    .animation-tabs-strip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      flex-shrink: 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding-bottom: 0.4rem;
+    }
+
+    .anim-tabs-list {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #223247 transparent;
+    }
+
+    .btn-anim-tab {
+      background: #0f1723;
+      color: #94a3b8;
+      border: 1px solid #202e42;
+      padding: 0.22rem 0.55rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.12s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .btn-anim-tab:hover {
+      background: #182638;
+      border-color: #38bdf8;
+      color: #e2e8f0;
+    }
+
+    .btn-anim-tab.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.35);
+    }
+
+    .anim-tab-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      background: rgba(0, 0, 0, 0.35);
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+      color: #7dd3fc;
+    }
+
+    .btn-anim-tab.active .anim-tab-badge {
+      background: rgba(255, 255, 255, 0.22);
+      color: #ffffff;
+    }
+
+    .btn-anim-tab-new {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px dashed #283e58;
+      color: #38bdf8;
+      padding: 0.22rem 0.55rem;
+      border-radius: 5px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: all 0.12s ease;
+    }
+
+    .btn-anim-tab-new:hover {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: #38bdf8;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+    }
+
+    .framestrip-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+
+    .transport-group, .frame-actions-group {
+      display: flex;
+      gap: 0.35rem;
+      align-items: center;
+    }
+
+    .btn-tool {
+      background: #172230;
+      color: #e2e8f0;
+      border: 1px solid #2a3b52;
+      padding: 0.3rem 0.6rem;
+      border-radius: 5px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 0.76rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      transition: all 0.12s ease;
+    }
+
+    .btn-tool:hover:not(:disabled) {
+      background: #25374e;
+      border-color: var(--accent);
+    }
+
+    .btn-tool:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-tool.primary {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: white;
+    }
+
+    .btn-tool.active {
+      background: #0369a1;
+      border-color: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
+
+    .btn-tool.icon-only {
+      min-width: 28px;
+      height: 26px;
+      padding: 0 0.35rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.82rem;
+    }
+
+    .btn-tool.icon-only svg,
+    .btn-group-action svg {
+      display: block;
+      flex-shrink: 0;
+      pointer-events: none;
+    }
+
+    .frame-indicator {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.76rem;
+      color: var(--accent);
+      background: #080c14;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      border: 1px solid #1a2536;
+    }
+
+    .frames-reel {
+      display: flex;
+      gap: 0.45rem;
+      overflow-x: auto;
+      padding: 0.3rem 0;
+      scrollbar-width: thin;
+      scrollbar-color: #223247 transparent;
+    }
+
+    .frame-cell {
+      position: relative;
+      flex: 0 0 54px;
+      height: 54px;
+      background: #ffffff;
+      border: 2px solid #cbd5e1;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      user-select: none;
+    }
+
+    .frame-cell:hover {
+      background: #ffffff;
+      border-color: #38bdf8;
+    }
+
+    .frame-cell.active {
+      background: #ffffff;
+      border-color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+    }
+
+    .frame-cell.in-range-selected {
+      background: #ffffff;
+      border-color: #818cf8;
+      outline: 1px solid #818cf8;
+      box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+    }
+
+    .frame-cell.in-range-selected .cell-num {
+      background: #818cf8;
+    }
+
+    .frame-cell.is-dragging {
+      opacity: 0.4;
+      border-style: dashed;
+      transform: scale(0.94);
+    }
+
+    .cell-num {
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #ffffff;
+      background: rgba(15, 23, 42, 0.82);
+      border-radius: 3px;
+      padding: 0.05rem 0.22rem;
+      line-height: 1;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    .frame-cell.active .cell-num {
+      color: #ffffff;
+      background: #0284c7;
+    }
+
+    .cell-thumb-canvas {
+      width: 44px;
+      height: 44px;
+      border-radius: 4px;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      pointer-events: none;
+    }
+
+    .cell-preview-thumb {
+      width: 18px;
+      height: 18px;
+      background: #06090e;
+      border-radius: 2px;
+      border: 1px dashed #202e42;
+    }
+
+    .btn-tool.btn-interpolate {
+      background: linear-gradient(135deg, #0284c7, #2563eb);
+      border-color: #38bdf8;
+      color: #ffffff;
+      font-weight: 600;
+      animation: interpolate-glow 1.5s infinite alternate ease-in-out;
+    }
+
+    @keyframes interpolate-glow {
+      0% { box-shadow: 0 0 4px rgba(56, 189, 248, 0.3); }
+      100% { box-shadow: 0 0 12px rgba(56, 189, 248, 0.7); }
+    }
+
+    .frame-cell.new {
+      background: rgba(15, 23, 42, 0.5);
+      border: 2px dashed #283a54;
+      color: #94a3b8;
+      cursor: grab;
+      user-select: none;
+      transition: all 0.15s ease;
+    }
+
+    .frame-cell.new:active {
+      cursor: grabbing;
+    }
+
+    .frame-cell.new:hover {
+      background: rgba(56, 189, 248, 0.08);
+      border-color: #38bdf8;
+      color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.25);
+    }
+
+    .frame-cell.new.is-dragging {
+      opacity: 0.35;
+      border-style: dotted;
+      transform: scale(0.95);
+    }
+
+    .cell-new-thumb {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(56, 189, 248, 0.06);
+      border: 1px dashed rgba(56, 189, 248, 0.3);
+      color: #38bdf8;
+    }
+
+    .frame-cell.new:hover .cell-new-thumb {
+      border-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.18);
+    }
+
+    /* Insertion Indicator Slot */
+    .frame-insert-slot {
+      flex: 0 0 6px;
+      height: 54px;
+      background: var(--accent);
+      border-radius: 3px;
+      box-shadow: 0 0 12px var(--accent);
+      position: relative;
+      margin: 0 3px;
+      animation: slot-pulse 0.6s infinite alternate ease-in-out;
+      pointer-events: none;
+      align-self: center;
+    }
+
+    .frame-insert-slot::before {
+      content: '+';
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 16px;
+      height: 16px;
+      background: var(--accent);
+      color: #030712;
+      font-size: 0.72rem;
+      font-weight: 900;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    @keyframes slot-pulse {
+      0% { opacity: 0.55; transform: scaleY(0.9); }
+      100% { opacity: 1; transform: scaleY(1.05); }
+    }
+
+    /* Touch Drag Ghost */
+    .frame-drag-ghost {
+      position: fixed;
+      width: 52px;
+      height: 52px;
+      border-radius: 6px;
+      background: rgba(14, 36, 59, 0.92);
+      border: 2px solid #38bdf8;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 14px rgba(56, 189, 248, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #38bdf8;
+      font-weight: 800;
+      font-size: 1.2rem;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%);
+    }
+
+
+    /* Grouping & In-Reel Pill over Intermediate Frames */
+    .btn-tool.btn-group-selection {
+      background: linear-gradient(135deg, #4f46e5, #6366f1);
+      border-color: #818cf8;
+      color: #ffffff;
+      box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+    }
+
+    .group-intermediate-wrapper {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 90px;
+      height: 54px;
+    }
+
+    .group-intermediate-cells {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      height: 54px;
+    }
+
+    .active-group-pill.in-reel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.45rem;
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1.5px solid #818cf8;
+      border-radius: 6px;
+      padding: 0.22rem 0.55rem;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.65), 0 0 12px rgba(99, 102, 241, 0.45);
+      pointer-events: auto;
+      white-space: nowrap;
+      cursor: pointer;
+      box-sizing: border-box;
+    }
+
+    .group-pill-name {
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #e0e7ff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      user-select: none;
+    }
+
+    .group-pill-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .btn-group-action {
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid #4338ca;
+      color: #e0e7ff;
+      width: 22px;
+      height: 22px;
+      border-radius: 4px;
+      font-size: 0.76rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1;
+      transition: all 0.12s ease;
+      flex-shrink: 0;
+    }
+
+    .btn-group-action:hover {
+      background: #4f46e5;
+      border-color: #818cf8;
+      color: #ffffff;
+      transform: scale(1.12);
+    }
+
+    .btn-group-action.btn-group-pivot.active {
+      background: #e43b44;
+      border-color: #ff6b6b;
+      color: #ffffff;
+      box-shadow: 0 0 8px rgba(228, 59, 68, 0.7);
+    }
+
+    .frame-cell.in-group {
+      border-color: #6366f1;
+      background: rgba(99, 102, 241, 0.12);
+    }
+
+    .frame-cell.group-intermediate {
+      border: 2px dashed rgba(99, 102, 241, 0.45);
+      background: rgba(15, 23, 42, 0.65);
+      opacity: 0.7;
+      cursor: pointer;
+    }
+
+    .cell-intermediate-lock {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      font-size: 0.58rem;
+      color: #a5b4fc;
+      pointer-events: none;
+      line-height: 1;
+      background: rgba(15, 23, 42, 0.8);
+      border-radius: 2px;
+      padding: 1px 2px;
+    }
+
+    .cell-pivot-dot {
+      position: absolute;
+      bottom: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #e43b44;
+      box-shadow: 0 0 4px #ff4444;
+      pointer-events: none;
+      z-index: 2;
+    }

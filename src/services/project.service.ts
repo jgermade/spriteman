@@ -50,6 +50,7 @@ export interface LayerData {
   pivot?: { x: number; y: number };
   relative_to_parent?: boolean;
   groups?: LayerFrameGroup[];
+  frame_pixels?: Record<number, Record<string, string>>;
   tracks?: {
     position?: Array<{ frame: number; value: [number, number]; easing?: string }>;
     rotation?: Array<{ frame: number; value: number; easing?: string }>;
@@ -61,6 +62,7 @@ export interface LayerData {
 
 export interface ProjectState {
   meta: ProjectMeta;
+  sheets?: any[];
   layers: LayerData[];
   selectedLayerId: string | null;
   frame_pixels: Record<number, Record<string, string>>;
@@ -83,6 +85,7 @@ class ProjectService {
         canvas_width: 64,
         canvas_height: 64,
       },
+      sheets: [],
       layers: [],
       selectedLayerId: null,
       frame_pixels: {},
@@ -106,6 +109,94 @@ class ProjectService {
   private undoStack: string[] = [];
   private redoStack: string[] = [];
   private readonly maxHistoryLength = 50;
+  private pixelDragBaseline: Record<string, string> | null = null;
+  private draggedPixelInitial: { x: number; y: number; color: string } | null = null;
+
+  public getCompositeFramePixels(frameIndex: number): Record<string, string> {
+    const composite: Record<string, string> = {};
+    const sortedLayers = [...this.state.layers].sort((a, b) => (a.z_index ?? 0) - (b.z_index ?? 0));
+    for (const layer of sortedLayers) {
+      if (layer.visible === false) continue;
+      const lPixels = layer.frame_pixels?.[frameIndex];
+      if (lPixels && Object.keys(lPixels).length > 0) {
+        Object.assign(composite, lPixels);
+      }
+    }
+    return composite;
+  }
+
+  public getLayerFramePixels(layerId: string, frameIndex: number): Record<string, string> {
+    const layer = this.state.layers.find((l) => l.id === layerId);
+    return layer?.frame_pixels?.[frameIndex] || {};
+  }
+
+  private layerDragBaselines: Map<string, Record<string, string>> | null = null;
+  private layerDragParsedBaselines: Map<string, Array<{ x: number; y: number; color: string }>> | null = null;
+  private layerDragCumulativeDelta: { x: number; y: number } = { x: 0, y: 0 };
+  private layerDragTargetId: string | null = null;
+  private layerDragInitialFrame: number | null = null;
+  private layerDragInitialTransform: any = null;
+  private layerDragInitialPivots: Map<string, { x: number; y: number }> | null = null;
+  private layerDragInitialTracks: any = null;
+
+  public startLayerTranslation(layerId: string, frameIndex?: number): void {
+    const targetLayer = this.state.layers.find((l) => l.id === layerId);
+    if (!targetLayer) return;
+
+    this.pushUndoSnapshot();
+
+    const fIdx = typeof frameIndex === "number" ? frameIndex : 0;
+    this.layerDragTargetId = layerId;
+    this.layerDragInitialFrame = fIdx;
+    this.layerDragCumulativeDelta = { x: 0, y: 0 };
+    this.layerDragBaselines = new Map();
+    this.layerDragInitialPivots = new Map();
+
+    const getLinkedDescendants = (parentId: string): LayerData[] => {
+      const children = this.state.layers.filter(
+        (l) => l.parent_id === parentId && l.relative_to_parent !== false
+      );
+      let all = [...children];
+      for (const ch of children) {
+        all = all.concat(getLinkedDescendants(ch.id));
+      }
+      return all;
+    };
+
+    this.layerDragParsedBaselines = new Map();
+    const movingLayers = [targetLayer, ...getLinkedDescendants(targetLayer.id)];
+    for (const l of movingLayers) {
+      if (!l.frame_pixels) l.frame_pixels = {};
+      if (!l.frame_pixels[fIdx] && this.state.frame_pixels[fIdx] && l.id === targetLayer.id) {
+        l.frame_pixels[fIdx] = { ...this.state.frame_pixels[fIdx] };
+      }
+      const baseMap = { ...(l.frame_pixels[fIdx] || {}) };
+      this.layerDragBaselines.set(l.id, baseMap);
+
+      const parsed: Array<{ x: number; y: number; color: string }> = [];
+      for (const key in baseMap) {
+        const comma = key.indexOf(",");
+        if (comma === -1) continue;
+        parsed.push({
+          x: parseInt(key.slice(0, comma), 10),
+          y: parseInt(key.slice(comma + 1), 10),
+          color: baseMap[key],
+        });
+      }
+      this.layerDragParsedBaselines.set(l.id, parsed);
+
+      if (l.pivot) {
+        this.layerDragInitialPivots.set(l.id, { ...l.pivot });
+      }
+    }
+
+    if (targetLayer.default_transform) {
+      this.layerDragInitialTransform = { ...targetLayer.default_transform };
+    }
+    if (targetLayer.tracks?.position) {
+      this.layerDragInitialTracks = JSON.parse(JSON.stringify(targetLayer.tracks.position));
+    }
+  }
 
   public clearHistory(): void {
     this.undoStack = [];
@@ -177,9 +268,11 @@ class ProjectService {
       },
       frame_pixels: { 0: {} },
       sheets: [],
+      selectedLayerId: 'layer_base',
       layers: [
         {
           id: 'layer_base',
+          frame_pixels: { 0: {} },
           name: 'Base Layer',
           parent_id: null,
           z_index: 0,
@@ -269,7 +362,29 @@ class ProjectService {
         this.state.activeAnimationId = 'anim_default';
       }
 
-      if (!this.state.selectedLayerId && this.state.layers.length > 0) {
+      this.state.sheets = parsed.sheets || [];
+      // Ensure layers have frame_pixels and migrate top-level pixels if needed
+      if (this.state.layers.length > 0) {
+        const hasLayerPixels = this.state.layers.some((l) => l.frame_pixels && Object.keys(l.frame_pixels).length > 0);
+        if (!hasLayerPixels && this.state.frame_pixels && Object.keys(this.state.frame_pixels).length > 0) {
+          this.state.layers[0].frame_pixels = JSON.parse(JSON.stringify(this.state.frame_pixels));
+        }
+        for (const layer of this.state.layers) {
+          if (!layer.frame_pixels) {
+            layer.frame_pixels = {};
+          }
+          if (layer.visible === undefined) {
+            layer.visible = true;
+          }
+        }
+        const total = this.state.meta.total_frames || 1;
+        for (let i = 0; i < total; i++) {
+          this.state.frame_pixels[i] = this.getCompositeFramePixels(i);
+        }
+      }
+
+      const validSelected = this.state.layers.some((l) => l.id === this.state.selectedLayerId);
+      if (!validSelected && this.state.layers.length > 0) {
         this.state.selectedLayerId = this.state.layers[0].id;
       }
       this.notify();
@@ -279,7 +394,12 @@ class ProjectService {
   }
 
   public selectLayer(layerId: string | null): void {
-    this.state.selectedLayerId = layerId;
+    if (this.state.layers.length === 0) {
+      this.state.selectedLayerId = null;
+    } else {
+      const found = this.state.layers.find((l) => l.id === layerId);
+      this.state.selectedLayerId = found ? found.id : this.state.layers[0].id;
+    }
     this.notify();
   }
 
@@ -455,6 +575,26 @@ class ProjectService {
     } else {
       nextPixels[insertIndex] = {};
     }
+    this.state.layers.forEach((layer) => {
+      if (layer.frame_pixels) {
+        const nextLayerPixels: Record<number, Record<string, string>> = {};
+        for (const [kStr, map] of Object.entries(layer.frame_pixels)) {
+          const k = parseInt(kStr, 10);
+          if (k < insertIndex) {
+            nextLayerPixels[k] = map;
+          } else {
+            nextLayerPixels[k + 1] = map;
+          }
+        }
+        if (copyPrevious) {
+          const sourceFrameIndex = insertIndex > 0 ? insertIndex - 1 : (currentTotal > 0 ? 1 : 0);
+          nextLayerPixels[insertIndex] = { ...(layer.frame_pixels[sourceFrameIndex] || {}) };
+        } else {
+          nextLayerPixels[insertIndex] = {};
+        }
+        layer.frame_pixels = nextLayerPixels;
+      }
+    });
     this.state.frame_pixels = nextPixels;
 
     this.updateJson();
@@ -489,6 +629,11 @@ class ProjectService {
       }
     });
 
+    this.state.layers.forEach((layer) => {
+      if (layer.frame_pixels && layer.frame_pixels[frameIndex]) {
+        layer.frame_pixels[newFrameIndex] = { ...layer.frame_pixels[frameIndex] };
+      }
+    });
     this.state.frame_pixels[newFrameIndex] = { ...(this.state.frame_pixels[frameIndex] || {}) };
 
     this.updateJson();
@@ -538,6 +683,20 @@ class ProjectService {
         nextPixels[k - 1] = map;
       }
     }
+    this.state.layers.forEach((layer) => {
+      if (layer.frame_pixels) {
+        const nextLayerPixels: Record<number, Record<string, string>> = {};
+        for (const [kStr, map] of Object.entries(layer.frame_pixels)) {
+          const k = parseInt(kStr, 10);
+          if (k < frameIndex) {
+            nextLayerPixels[k] = map;
+          } else if (k > frameIndex) {
+            nextLayerPixels[k - 1] = map;
+          }
+        }
+        layer.frame_pixels = nextLayerPixels;
+      }
+    });
     this.state.frame_pixels = nextPixels;
 
     this.state.meta.total_frames -= 1;
@@ -559,6 +718,7 @@ class ProjectService {
     const newLayer: LayerData = {
       id,
       name: layerName,
+      frame_pixels: {},
       parent_id: parentId,
       z_index: this.state.layers.length,
       visible: true,
@@ -621,8 +781,8 @@ class ProjectService {
       l.z_index = i;
     });
 
-    if (this.state.selectedLayerId === layerId) {
-      const nextLayer = this.state.layers[Math.min(idx, this.state.layers.length - 1)];
+    if (this.state.selectedLayerId === layerId || !this.state.layers.some((l) => l.id === this.state.selectedLayerId)) {
+      const nextLayer = this.state.layers[Math.min(idx, this.state.layers.length - 1)] || this.state.layers[0];
       this.state.selectedLayerId = nextLayer ? nextLayer.id : null;
     }
 
@@ -653,6 +813,11 @@ class ProjectService {
     if (layer) {
       this.pushUndoSnapshot();
       layer.visible = layer.visible === false ? true : false;
+      this.state.layers = [...this.state.layers];
+      const total = this.state.meta.total_frames || Object.keys(this.state.frame_pixels).length || 1;
+      for (let fIdx = 0; fIdx < total; fIdx++) {
+        this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+      }
       this.updateJson();
       this.notify();
     }
@@ -689,8 +854,27 @@ class ProjectService {
       l.z_index = idx;
     });
 
+    this.state.layers = [...this.state.layers];
+    const total = this.state.meta.total_frames || Object.keys(this.state.frame_pixels).length || 1;
+    for (let fIdx = 0; fIdx < total; fIdx++) {
+      this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+    }
     this.updateJson();
     this.notify();
+  }
+
+  public moveLayerUp(layerId: string): void {
+    const idx = this.state.layers.findIndex((l) => l.id === layerId);
+    if (idx < this.state.layers.length - 1) {
+      this.reorderLayer(layerId, idx + 1);
+    }
+  }
+
+  public moveLayerDown(layerId: string): void {
+    const idx = this.state.layers.findIndex((l) => l.id === layerId);
+    if (idx > 0) {
+      this.reorderLayer(layerId, idx - 1);
+    }
   }
 
   /**
@@ -736,73 +920,158 @@ class ProjectService {
    * Translates a layer by (deltaX, deltaY) pixels.
    * Modifies the default_transform and any keyframes on the current frame.
    */
-  public translateLayer(layerId: string, deltaX: number, deltaY: number, frameIndex?: number): void {
-    const layer = this.state.layers.find((l) => l.id === layerId);
-    if (!layer) return;
-    this.pushUndoSnapshot();
+  public translateLayer(
+    layerId: string,
+    deltaX: number,
+    deltaY: number,
+    frameIndex?: number,
+    isFinal: boolean = true
+  ): void {
+    const targetLayer = this.state.layers.find((l) => l.id === layerId);
+    if (!targetLayer) return;
 
-    if (!layer.default_transform) {
-      layer.default_transform = {
-        x: Math.round(this.state.meta.canvas_width / 2) + deltaX,
-        y: Math.round(this.state.meta.canvas_height / 2) + deltaY,
-        rotation: 0,
-        scale_x: 1,
-        scale_y: 1,
-        opacity: 1,
-      };
-    } else {
-      layer.default_transform.x += deltaX;
-      layer.default_transform.y += deltaY;
+    const fIdx = typeof frameIndex === "number" ? frameIndex : (this.layerDragInitialFrame ?? 0);
+
+    if (!this.layerDragBaselines || this.layerDragTargetId !== layerId) {
+      this.startLayerTranslation(layerId, fIdx);
     }
 
-    if (!layer.tracks) layer.tracks = {};
-    if (!layer.tracks.position) layer.tracks.position = [];
+    this.layerDragCumulativeDelta.x += deltaX;
+    this.layerDragCumulativeDelta.y += deltaY;
 
-    if (layer.tracks.position.length > 0) {
-      if (typeof frameIndex === 'number') {
-        const kf = layer.tracks.position.find((k) => Math.round(k.frame) === Math.round(frameIndex));
-        if (kf) {
-          kf.value = [kf.value[0] + deltaX, kf.value[1] + deltaY];
-        } else {
-          layer.tracks.position.push({
-            frame: frameIndex,
-            value: [layer.default_transform.x, layer.default_transform.y],
-            easing: 'linear',
-          });
-          layer.tracks.position.sort((a, b) => a.frame - b.frame);
-        }
-      } else {
-        layer.tracks.position.forEach((k) => {
-          k.value = [k.value[0] + deltaX, k.value[1] + deltaY];
-        });
-      }
-    }
+    const totalDx = this.layerDragCumulativeDelta.x;
+    const totalDy = this.layerDragCumulativeDelta.y;
+    const w = this.state.meta.canvas_width;
+    const h = this.state.meta.canvas_height;
 
-    if (layer.pivot) {
-      layer.pivot.x += deltaX;
-      layer.pivot.y += deltaY;
-    }
-
-    // Shift pixels on current frame
-    if (typeof frameIndex === 'number' && this.state.frame_pixels[frameIndex]) {
-      const oldMap = this.state.frame_pixels[frameIndex];
+    // Shift pixels from pre-parsed baseline (zero string parsing/splitting, zero cumulative clipping or drift)
+    const parsedMap = this.layerDragParsedBaselines || new Map();
+    for (const [lId, parsed] of parsedMap) {
+      const l = this.state.layers.find((lyr) => lyr.id === lId);
+      if (!l) continue;
       const newMap: Record<string, string> = {};
-      for (const [key, color] of Object.entries(oldMap)) {
-        const comma = key.indexOf(',');
-        if (comma === -1) continue;
-        const px = parseInt(key.slice(0, comma), 10);
-        const py = parseInt(key.slice(comma + 1), 10);
-        const nx = px + deltaX;
-        const ny = py + deltaY;
-        if (nx >= 0 && nx < this.state.meta.canvas_width && ny >= 0 && ny < this.state.meta.canvas_height) {
-          newMap[`${nx},${ny}`] = color;
+      for (let i = 0; i < parsed.length; i++) {
+        const p = parsed[i];
+        const nx = p.x + totalDx;
+        const ny = p.y + totalDy;
+        if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
+          newMap[`${nx},${ny}`] = p.color;
         }
       }
-      this.state.frame_pixels[frameIndex] = newMap;
-      this.autoRecalculateGroupsForFrame(frameIndex);
+      if (!l.frame_pixels) l.frame_pixels = {};
+      l.frame_pixels[fIdx] = newMap;
+
+      const initPivot = this.layerDragInitialPivots?.get(lId);
+      if (initPivot && l.pivot) {
+        l.pivot.x = initPivot.x + totalDx;
+        l.pivot.y = initPivot.y + totalDy;
+      }
     }
 
-    this.updateJson();
+    // Recompute composite for the current frame
+    this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+
+    if (isFinal) {
+      if (this.layerDragInitialTransform) {
+        targetLayer.default_transform.x = this.layerDragInitialTransform.x + totalDx;
+        targetLayer.default_transform.y = this.layerDragInitialTransform.y + totalDy;
+      }
+      if (this.layerDragInitialTracks && targetLayer.tracks?.position) {
+        targetLayer.tracks.position = JSON.parse(JSON.stringify(this.layerDragInitialTracks));
+        const kf = targetLayer.tracks.position.find((k: any) => Math.round(k.frame) === Math.round(fIdx));
+        if (kf) {
+          kf.value = [kf.value[0] + totalDx, kf.value[1] + totalDy];
+        } else if (targetLayer.default_transform) {
+          targetLayer.tracks.position.push({
+            frame: fIdx,
+            value: [targetLayer.default_transform.x, targetLayer.default_transform.y],
+            easing: "linear",
+          });
+          targetLayer.tracks.position.sort((a: any, b: any) => a.frame - b.frame);
+        }
+      }
+
+      this.autoRecalculateGroupsForFrame(fIdx);
+      this.updateJson();
+      this.layerDragBaselines = null;
+      this.layerDragParsedBaselines = null;
+      this.layerDragTargetId = null;
+      this.layerDragInitialPivots = null;
+      this.layerDragInitialTransform = null;
+      this.layerDragInitialTracks = null;
+
+      this.notify();
+    }
+  }
+
+  public startPixelMove(layerId: string, frameIndex: number, x: number, y: number): void {
+    const targetLayer = this.state.layers.find((l) => l.id === layerId) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (!targetLayer) return;
+
+    if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
+    if (!targetLayer.frame_pixels[frameIndex] && this.state.frame_pixels[frameIndex]) {
+      targetLayer.frame_pixels[frameIndex] = { ...this.state.frame_pixels[frameIndex] };
+    }
+    if (!targetLayer.frame_pixels[frameIndex]) {
+      targetLayer.frame_pixels[frameIndex] = {};
+    }
+
+    this.pushUndoSnapshot();
+    this.pixelDragBaseline = { ...targetLayer.frame_pixels[frameIndex] };
+    const color = this.pixelDragBaseline[`${x},${y}`] || "";
+    this.draggedPixelInitial = { x, y, color };
+  }
+
+  public movePixel(
+    layerId: string,
+    frameIndex: number,
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+    isFinal: boolean = true
+  ): void {
+    const targetLayer = this.state.layers.find((l) => l.id === layerId) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (!targetLayer || !this.pixelDragBaseline || !this.draggedPixelInitial) return;
+
+    const w = this.state.meta.canvas_width;
+    const h = this.state.meta.canvas_height;
+    const clampedToX = Math.max(0, Math.min(w - 1, toX));
+    const clampedToY = Math.max(0, Math.min(h - 1, toY));
+
+    const map: Record<string, string> = { ...this.pixelDragBaseline };
+    delete map[`${fromX},${fromY}`];
+    if (this.draggedPixelInitial.color) {
+      map[`${clampedToX},${clampedToY}`] = this.draggedPixelInitial.color;
+    }
+
+    targetLayer.frame_pixels[frameIndex] = map;
+    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+
+    if (isFinal) {
+      this.pixelDragBaseline = null;
+      this.draggedPixelInitial = null;
+      this.autoRecalculateGroupsForFrame(frameIndex);
+      this.updateJson();
+    }
+    this.notify();
+  }
+
+  public cancelPixelMove(layerId: string, frameIndex: number): void {
+    if (!this.pixelDragBaseline) return;
+    const targetLayer = this.state.layers.find((l) => l.id === layerId) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (targetLayer) {
+      targetLayer.frame_pixels[frameIndex] = { ...this.pixelDragBaseline };
+      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+    }
+    this.pixelDragBaseline = null;
+    this.draggedPixelInitial = null;
     this.notify();
   }
 
@@ -828,6 +1097,21 @@ class ProjectService {
     const nextPixels: Record<number, Record<string, string>> = {};
     framesArray.forEach((pxMap, idx) => {
       nextPixels[idx] = pxMap;
+    });
+    this.state.layers.forEach((layer) => {
+      if (layer.frame_pixels) {
+        const framesArray: Array<Record<string, string>> = [];
+        for (let i = 0; i < total; i++) {
+          framesArray.push({ ...(layer.frame_pixels[i] || {}) });
+        }
+        const [movedPixels] = framesArray.splice(fromIndex, 1);
+        framesArray.splice(toIndex, 0, movedPixels);
+        const nextLayerPixels: Record<number, Record<string, string>> = {};
+        framesArray.forEach((pxMap, idx) => {
+          nextLayerPixels[idx] = pxMap;
+        });
+        layer.frame_pixels = nextLayerPixels;
+      }
     });
     this.state.frame_pixels = nextPixels;
 
@@ -935,8 +1219,42 @@ class ProjectService {
     this.notify();
   }
 
-  public getFramePixels(frameIndex: number): Record<string, string> {
-    return this.state.frame_pixels[frameIndex] || {};
+  public getFramePixels(frameIndex: number, layerId?: string | null): Record<string, string> {
+    if (layerId) {
+      return this.getLayerFramePixels(layerId, frameIndex);
+    }
+    return this.getCompositeFramePixels(frameIndex);
+  }
+
+  public getActiveLayerMovingPixels(frameIndex: number): Record<string, string> {
+    const targetLayer = this.state.layers.find((l) => l.id === this.state.selectedLayerId) || this.state.layers[0];
+    if (!targetLayer) return {};
+
+    const getLinkedDescendants = (parentId: string): LayerData[] => {
+      const children = this.state.layers.filter(
+        (l) => l.parent_id === parentId && l.relative_to_parent !== false
+      );
+      let all = [...children];
+      for (const ch of children) {
+        all = all.concat(getLinkedDescendants(ch.id));
+      }
+      return all;
+    };
+
+    const movingLayers = [targetLayer, ...getLinkedDescendants(targetLayer.id)];
+    const movingPixels: Record<string, string> = {};
+
+    for (const l of movingLayers) {
+      if (l.visible === false) continue;
+      const map = l.frame_pixels?.[frameIndex];
+      if (map && Object.keys(map).length > 0) {
+        Object.assign(movingPixels, map);
+      } else if (l.id === targetLayer.id && this.state.frame_pixels?.[frameIndex] && Object.keys(movingPixels).length === 0) {
+        Object.assign(movingPixels, this.state.frame_pixels[frameIndex]);
+      }
+    }
+
+    return movingPixels;
   }
 
   private autoRecalculateGroupsForFrame(frameIndex: number): void {
@@ -950,48 +1268,66 @@ class ProjectService {
     }
   }
 
-  public setPixel(frameIndex: number, x: number, y: number, color: string): void {
+  public setPixel(frameIndex: number, x: number, y: number, color: string, layerId?: string): void {
     this.pushUndoSnapshot();
-    if (!this.state.frame_pixels[frameIndex]) {
-      this.state.frame_pixels[frameIndex] = {};
+    const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (targetLayer) {
+      if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
+      if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
+      targetLayer.frame_pixels[frameIndex][`${x},${y}`] = color;
     }
-    this.state.frame_pixels[frameIndex][`${x},${y}`] = color;
+    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
     this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
   }
 
-  public setPixels(frameIndex: number, pixels: Array<{ x: number; y: number }>, color: string): void {
+  public setPixels(frameIndex: number, pixels: Array<{ x: number; y: number }>, color: string, layerId?: string): void {
     this.pushUndoSnapshot();
-    if (!this.state.frame_pixels[frameIndex]) {
-      this.state.frame_pixels[frameIndex] = {};
+    const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (targetLayer) {
+      if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
+      if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
+      const map = targetLayer.frame_pixels[frameIndex];
+      for (const p of pixels) {
+        map[`${p.x},${p.y}`] = color;
+      }
     }
-    const map = this.state.frame_pixels[frameIndex];
-    for (const p of pixels) {
-      map[`${p.x},${p.y}`] = color;
-    }
+    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
     this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
   }
 
-  public erasePixel(frameIndex: number, x: number, y: number): void {
-    if (this.state.frame_pixels[frameIndex]) {
+  public erasePixel(frameIndex: number, x: number, y: number, layerId?: string): void {
+    const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
       this.pushUndoSnapshot();
-      delete this.state.frame_pixels[frameIndex][`${x},${y}`];
+      delete targetLayer.frame_pixels[frameIndex][`${x},${y}`];
+      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
     }
   }
 
-  public erasePixels(frameIndex: number, pixels: Array<{ x: number; y: number }>): void {
-    if (this.state.frame_pixels[frameIndex]) {
+  public erasePixels(frameIndex: number, pixels: Array<{ x: number; y: number }>, layerId?: string): void {
+    const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
       this.pushUndoSnapshot();
-      const map = this.state.frame_pixels[frameIndex];
+      const map = targetLayer.frame_pixels[frameIndex];
       for (const p of pixels) {
         delete map[`${p.x},${p.y}`];
       }
+      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
@@ -1168,7 +1504,7 @@ class ProjectService {
   }
 
   public getState(): ProjectState {
-    return { ...this.state };
+    return { ...this.state, layers: [...this.state.layers] };
   }
 
   public subscribe(listener: ProjectListener): () => void {
