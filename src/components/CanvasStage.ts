@@ -235,7 +235,7 @@ export class CanvasStage {
   }
 
   private updateCursor(): void {
-    if ((this.isShiftHeld && this.isCtrlHeld) || this.isMovingLayer) {
+    if ((this.isShiftHeld && (this.isCtrlHeld || this.isCmdHeld)) || this.isMovingLayer) {
       this.canvas.style.cursor = 'move';
     } else if (this.isShiftHeld || this.isMousePanning) {
       this.canvas.style.cursor = this.isMouseDown ? 'grabbing' : 'grab';
@@ -282,11 +282,15 @@ export class CanvasStage {
     if (hint) {
       hint.textContent = this.isSettingPivot
         ? '📍 Clic en el canvas para posicionar el eje de giro (pivote) del grupo'
-        : (this.isShiftHeld && this.isCtrlHeld)
-          ? '✥ Modo Desplazar Capa (Arrastra para mover la posición de la capa)'
-          : (this.isCmdHeld || this.isAltHeld)
-            ? '🎯 Intercambio Temporal de Color activo (CMD/ALT)'
-            : 'Clic Izq: Color I • CMD/ALT: Intercambio Temp • SHIFT: Agarre • CTRL: Zoom • SHIFT+CTRL: Mover Capa';
+        : (this.isShiftHeld && (this.isCtrlHeld || this.isCmdHeld))
+        ? '✥ SHIFT+CTRL: Mover Capa'
+        : this.isShiftHeld
+        ? '✋ SHIFT: Modo Arrastrar / Desplazar Lienzo'
+        : this.isCtrlHeld
+        ? '🔍 CTRL: Modo Zoom (Arrastrar Arriba / Abajo)'
+        : (this.isCmdHeld || this.isAltHeld)
+        ? '⇄ CMD/ALT: Intercambio Temporal I / D'
+        : 'Clic Izquierdo: Color I · Clic Derecho: Color D · SHIFT: Mover · CTRL: Zoom';
     }
   }
 
@@ -486,12 +490,14 @@ export class CanvasStage {
       this.isCmdHeld = e.metaKey;
       this.isAltHeld = e.altKey;
 
-      // Mode 0: SHIFT + CTRL = Desplazar la Capa (Layer Move Mode)
-      if ((this.isShiftHeld && this.isCtrlHeld) || (e.shiftKey && e.ctrlKey)) {
+      // Mode 0: SHIFT + CTRL / SHIFT + CMD = Desplazar la Capa (Layer Move Mode)
+      const isShiftCtrlMove =
+        (this.isShiftHeld && (this.isCtrlHeld || this.isCmdHeld)) ||
+        (e.shiftKey && (e.ctrlKey || e.metaKey));
+      if (isShiftCtrlMove) {
         e.preventDefault();
         this.isMovingLayer = true;
-        const px = this.getSpritePixelAtPointer(e.clientX, e.clientY);
-        this.layerMoveStart = px || { x: 0, y: 0 };
+        this.layerMoveStart = { x: e.clientX, y: e.clientY };
         this.updateCursor();
         return;
       }
@@ -529,21 +535,23 @@ export class CanvasStage {
         return;
       }
 
-      // Mode D: Dual Color Painting Mode (Left click = Color 1, Right click or CMD/ALT + Left click = Color 2)
+      // Mode D: Dual Color Painting Mode (Left click = Color I, Right click = Color D)
       if (e.button === 0 || e.button === 2) {
         e.preventDefault();
         const pixel = this.getSpritePixelAtPointer(e.clientX, e.clientY);
         if (pixel) {
           this.isPainting = true;
           const isRightClick = e.button === 2;
-          const isCmdAlt = e.metaKey || this.isCmdHeld || e.altKey || this.isAltHeld;
-          const useSecondary = isRightClick || isCmdAlt;
-          const colorToPaint = useSecondary ? this.secondaryColor : this.primaryColor;
+          const colorToPaint = isRightClick ? this.secondaryColor : this.primaryColor;
           this.currentPaintColor = colorToPaint;
           this.lastPaintedPixel = pixel;
           this.currentStrokePixels = [pixel];
 
-          this.framePixels[`${pixel.x},${pixel.y}`] = colorToPaint;
+          if (colorToPaint === '__eraser__') {
+            delete this.framePixels[`${pixel.x},${pixel.y}`];
+          } else {
+            this.framePixels[`${pixel.x},${pixel.y}`] = colorToPaint;
+          }
           this.onPaintPixel?.(pixel.x, pixel.y, colorToPaint);
           this.redraw();
         }
@@ -556,16 +564,16 @@ export class CanvasStage {
       this.isCmdHeld = e.metaKey;
       this.isAltHeld = e.altKey;
 
-      // Handle Layer Move Drag (SHIFT + CTRL)
+      // Handle Layer Move Drag (SHIFT + CTRL / SHIFT + CMD)
       if (this.isMovingLayer) {
-        const px = this.getSpritePixelAtPointer(e.clientX, e.clientY);
-        if (px) {
-          const dx = px.x - this.layerMoveStart.x;
-          const dy = px.y - this.layerMoveStart.y;
-          if (dx !== 0 || dy !== 0) {
-            this.layerMoveStart = px;
-            this.onTranslateLayer?.(dx, dy);
-          }
+        const screenDx = e.clientX - this.layerMoveStart.x;
+        const screenDy = e.clientY - this.layerMoveStart.y;
+        const dx = Math.round(screenDx / this.zoom);
+        const dy = Math.round(screenDy / this.zoom);
+        if (dx !== 0 || dy !== 0) {
+          this.layerMoveStart.x += dx * this.zoom;
+          this.layerMoveStart.y += dy * this.zoom;
+          this.onTranslateLayer?.(dx, dy);
         }
         return;
       }
@@ -603,7 +611,11 @@ export class CanvasStage {
               : [pixel];
             for (const pt of points) {
               this.currentStrokePixels.push(pt);
-              this.framePixels[`${pt.x},${pt.y}`] = this.currentPaintColor;
+              if (this.currentPaintColor === '__eraser__') {
+                delete this.framePixels[`${pt.x},${pt.y}`];
+              } else {
+                this.framePixels[`${pt.x},${pt.y}`] = this.currentPaintColor;
+              }
             }
             this.lastPaintedPixel = pixel;
             this.hoverPixel = pixel;
@@ -778,7 +790,8 @@ export class CanvasStage {
 
     // 8. Draw pixel cursor hover highlight (only in painting mode, not in grab/zoom mode)
     if (this.hoverPixel && !this.isShiftHeld && !this.isCtrlHeld) {
-      const hoverColor = (this.isCmdHeld || this.isAltHeld) ? this.secondaryColor : this.primaryColor;
+      let hoverColor = (this.isCmdHeld || this.isAltHeld) ? this.secondaryColor : this.primaryColor;
+      if (hoverColor === '__eraser__') hoverColor = 'rgba(239, 68, 68, 0.5)';
       drawPixelCursor(
         this.ctx,
         -halfSw,

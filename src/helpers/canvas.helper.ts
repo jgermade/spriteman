@@ -216,7 +216,7 @@ export function renderThumbnailToCanvas(
   ctx.clearRect(0, 0, tw, th);
 
   // Background
-  ctx.fillStyle = '#06090e';
+  ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, tw, th);
 
   const scaleX = tw / Math.max(1, spriteWidth);

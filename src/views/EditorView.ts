@@ -46,7 +46,16 @@ export class EditorView {
       secondaryColor: '#ffffff',
       onPaintStroke: (pixels, color) => {
         const currentInt = Math.round(animationService.getState().currentFrame);
-        projectService.setPixels(currentInt, pixels, color);
+        const group = projectService.getActiveLayerGroupForFrame(currentInt);
+        if (group && currentInt > group.start_frame && currentInt < group.end_frame) {
+          // Intermediate frames in group are auto-interpolated, non-editable
+          return;
+        }
+        if (color === '__eraser__') {
+          projectService.erasePixels(currentInt, pixels);
+        } else {
+          projectService.setPixels(currentInt, pixels, color);
+        }
         this.saveCurrentProject();
       },
       onSetPivot: (x, y) => {
@@ -131,6 +140,7 @@ export class EditorView {
         const selectedId = projectService.getState().selectedLayerId;
         if (selectedId) {
           projectService.createFrameGroup(selectedId, start, end);
+          animationService.reloadProject(projectService.getRawJson());
           this.saveCurrentProject();
         }
       },
@@ -138,6 +148,7 @@ export class EditorView {
         const selectedId = projectService.getState().selectedLayerId;
         if (selectedId) {
           projectService.deleteFrameGroup(selectedId, groupId);
+          animationService.reloadProject(projectService.getRawJson());
           this.saveCurrentProject();
         }
       },
@@ -198,6 +209,8 @@ export class EditorView {
         animationService.seek(0);
         this.saveCurrentProject();
       },
+      onUndo: () => this.handleUndo(),
+      onRedo: () => this.handleRedo(),
     });
 
     this.pixelPalette = new PixelPalette({
@@ -262,6 +275,22 @@ export class EditorView {
         animationService.reloadProject(projectService.getRawJson());
         this.saveCurrentProject();
       },
+      onToggleLayerVisibility: (layerId) => {
+        projectService.toggleLayerVisibility(layerId);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onRenameLayer: (layerId, name) => {
+        projectService.renameLayer(layerId, name);
+        animationService.reloadProject(projectService.getRawJson());
+        this.saveCurrentProject();
+      },
+      onDeleteLayer: (layerId) => {
+        if (projectService.deleteLayer(layerId)) {
+          animationService.reloadProject(projectService.getRawJson());
+          this.saveCurrentProject();
+        }
+      },
       onTogglePivotMode: () => {
         const next = !this.canvasStage.isPivotMode();
         this.canvasStage.setPivotMode(next);
@@ -303,6 +332,7 @@ export class EditorView {
 
     this.buildLayout();
     this.bindServices();
+    this.initKeyboardShortcuts();
     this.initAppFlow();
   }
 
@@ -330,6 +360,8 @@ export class EditorView {
         </div>
 
         <div class="topbar-right">
+          <button id="btn-topbar-undo" class="topbar-btn" title="Deshacer (Cmd+Z)" style="display: none;">↶ Deshacer</button>
+          <button id="btn-topbar-redo" class="topbar-btn" title="Rehacer (Cmd+Shift+Z)" style="display: none;">↷ Rehacer</button>
           <button id="btn-menu-save" class="topbar-btn primary" title="Save Project to WASMFS" style="display: none;">💾 Save</button>
           <button id="pwa-install-btn" class="pwa-install-btn" style="display: none;">⬇ Install App</button>
         </div>
@@ -376,6 +408,14 @@ export class EditorView {
     this.root.querySelector('.settings-wrapper')!.appendChild(this.animationSettings.getElement());
     this.root.querySelector('.modal-wrapper')!.appendChild(this.projectModal.getElement());
 
+    // Topbar undo / redo actions
+    this.root.querySelector('#btn-topbar-undo')?.addEventListener('click', () => {
+      this.handleUndo();
+    });
+    this.root.querySelector('#btn-topbar-redo')?.addEventListener('click', () => {
+      this.handleRedo();
+    });
+
     // Topbar save action
     this.root.querySelector('#btn-menu-save')?.addEventListener('click', () => {
       this.saveCurrentProject();
@@ -384,6 +424,78 @@ export class EditorView {
     // PWA install button
     this.root.querySelector('#pwa-install-btn')?.addEventListener('click', () => {
       pwaService.promptInstall();
+    });
+  }
+
+  private handleUndo(): void {
+    if (projectService.undo()) {
+      const raw = projectService.getRawJson();
+      animationService.reloadProject(raw);
+      const totalFrames = projectService.getState().meta.total_frames;
+      const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
+      animationService.seek(curF);
+      this.saveCurrentProject();
+    }
+  }
+
+  private handleRedo(): void {
+    if (projectService.redo()) {
+      const raw = projectService.getRawJson();
+      animationService.reloadProject(raw);
+      const totalFrames = projectService.getState().meta.total_frames;
+      const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
+      animationService.seek(curF);
+      this.saveCurrentProject();
+    }
+  }
+
+  private initKeyboardShortcuts(): void {
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      // Don't intercept when user is typing in inputs or textareas
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.classList.contains('layer-rename-input'))
+      ) {
+        return;
+      }
+
+      // Check if project is open
+      const hasProject = tabsService.getState().tabs.length > 0 && !!tabsService.getState().activeTab;
+      if (!hasProject) return;
+
+      const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+
+      // Undo / Redo: Cmd+Z, Cmd+Shift+Z, Cmd+Y
+      if (isCmdOrCtrl) {
+        if (e.key === 'z' || e.key === 'Z') {
+          e.preventDefault();
+          if (e.shiftKey) {
+            this.handleRedo();
+          } else {
+            this.handleUndo();
+          }
+          return;
+        }
+        if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault();
+          this.handleRedo();
+          return;
+        }
+      }
+
+      // Add frame hotkey: '+' or '=' (with or without shift, or numpad +)
+      if ((e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !isCmdOrCtrl && !e.altKey) {
+        e.preventDefault();
+        const newIdx = projectService.addFrame(true);
+        animationService.reloadProject(projectService.getRawJson());
+        animationService.seek(newIdx);
+        this.saveCurrentProject();
+        return;
+      }
     });
   }
 
@@ -413,6 +525,8 @@ export class EditorView {
     const workspace = this.root.querySelector('.app-workspace') as HTMLElement;
     const welcomeWrapper = this.root.querySelector('.welcome-screen-wrapper') as HTMLElement;
     const saveBtn = this.root.querySelector('#btn-menu-save') as HTMLElement;
+    const undoBtn = this.root.querySelector('#btn-topbar-undo') as HTMLElement;
+    const redoBtn = this.root.querySelector('#btn-topbar-redo') as HTMLElement;
     const sizeBadge = this.root.querySelector('#topbar-size-badge') as HTMLElement;
     const fpsBadge = this.root.querySelector('#topbar-fps-badge') as HTMLElement;
 
@@ -421,6 +535,8 @@ export class EditorView {
       workspace.style.display = 'none';
       welcomeWrapper.style.display = 'flex';
       saveBtn.style.display = 'none';
+      if (undoBtn) undoBtn.style.display = 'none';
+      if (redoBtn) redoBtn.style.display = 'none';
       sizeBadge.style.display = 'none';
       fpsBadge.style.display = 'none';
 
@@ -434,6 +550,8 @@ export class EditorView {
     welcomeWrapper.style.display = 'none';
     workspace.style.display = 'grid';
     saveBtn.style.display = 'inline-flex';
+    if (undoBtn) undoBtn.style.display = 'inline-flex';
+    if (redoBtn) redoBtn.style.display = 'inline-flex';
     sizeBadge.style.display = 'inline-block';
     fpsBadge.style.display = 'inline-block';
 
@@ -520,6 +638,8 @@ export class EditorView {
       const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
       const isPivot = this.canvasStage.isPivotMode();
 
+      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
+
       this.frameStrip.update(
         animState.currentFrame,
         animState.totalFrames,
@@ -531,12 +651,14 @@ export class EditorView {
         proj.activeAnimationId,
         layerGroups,
         activeGroup,
-        isPivot
+        isPivot,
+        projectService.canUndo(),
+        projectService.canRedo()
       );
 
-      const currentPixels = projectService.getFramePixels(currentInt);
+      const currentPixels = isLayerVisible ? projectService.getFramePixels(currentInt) : {};
       const prevInt = Math.max(0, currentInt - 1);
-      const onionPixels = animState.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
+      const onionPixels = animState.onionSkinEnabled && currentInt > 0 && isLayerVisible ? projectService.getFramePixels(prevInt) : null;
       this.canvasStage.setFramePixels(currentPixels, onionPixels);
 
       const pivot = activeGroup?.pivot ?? activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
@@ -560,6 +682,7 @@ export class EditorView {
       const anim = animationService.getState();
       const currentInt = Math.round(anim.currentFrame);
       const activeLayer = projState.layers.find((l) => l.id === projState.selectedLayerId);
+      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
       const layerGroups = activeLayer?.groups || [];
       const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
       const pivot = activeGroup?.pivot ?? activeLayer?.pivot ?? activeLayer?.default_transform?.pivot ?? null;
@@ -575,6 +698,11 @@ export class EditorView {
         fpsBadge.textContent = `${projState.meta.fps} FPS`;
       }
 
+      const undoBtn = this.root.querySelector('#btn-topbar-undo') as HTMLButtonElement | null;
+      const redoBtn = this.root.querySelector('#btn-topbar-redo') as HTMLButtonElement | null;
+      if (undoBtn) undoBtn.disabled = !projectService.canUndo();
+      if (redoBtn) redoBtn.disabled = !projectService.canRedo();
+
       this.canvasStage.setCanvasSize(projState.meta.canvas_width, projState.meta.canvas_height);
       this.animationSettings.setValues(
         projState.meta.canvas_width,
@@ -583,9 +711,9 @@ export class EditorView {
         this.currentZoom
       );
 
-      const currentPixels = projState.frame_pixels[currentInt] || {};
+      const currentPixels = isLayerVisible ? (projState.frame_pixels[currentInt] || {}) : {};
       const prevInt = Math.max(0, currentInt - 1);
-      const onionPixels = anim.onionSkinEnabled && currentInt > 0 ? (projState.frame_pixels[prevInt] || {}) : null;
+      const onionPixels = anim.onionSkinEnabled && currentInt > 0 && isLayerVisible ? (projState.frame_pixels[prevInt] || {}) : null;
       this.canvasStage.setFramePixels(currentPixels, onionPixels);
 
       this.frameStrip.update(
@@ -599,7 +727,9 @@ export class EditorView {
         projState.activeAnimationId,
         layerGroups,
         activeGroup,
-        isPivot
+        isPivot,
+        projectService.canUndo(),
+        projectService.canRedo()
       );
 
       if (anim.resolvedFrame) {

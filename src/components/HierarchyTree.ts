@@ -19,6 +19,9 @@ export interface HierarchyTreeOptions {
   onAddLayer?: () => void;
   onTogglePivotMode?: () => void;
   onToggleLayerRelative?: (layerId: string) => void;
+  onToggleLayerVisibility?: (layerId: string) => void;
+  onRenameLayer?: (layerId: string, name: string) => void;
+  onDeleteLayer?: (layerId: string) => void;
   onReorderLayer?: (layerId: string, targetIndex: number, newParentId: string | null) => void;
 }
 
@@ -28,6 +31,9 @@ export class HierarchyTree {
   private onAddLayer?: () => void;
   private onTogglePivotMode?: () => void;
   private onToggleLayerRelative?: (layerId: string) => void;
+  private onToggleLayerVisibility?: (layerId: string) => void;
+  private onRenameLayer?: (layerId: string, name: string) => void;
+  private onDeleteLayer?: (layerId: string) => void;
   private onReorderLayer?: (layerId: string, targetIndex: number, newParentId: string | null) => void;
   private isPivotModeActive: boolean = false;
 
@@ -36,6 +42,9 @@ export class HierarchyTree {
     this.onAddLayer = options.onAddLayer;
     this.onTogglePivotMode = options.onTogglePivotMode;
     this.onToggleLayerRelative = options.onToggleLayerRelative;
+    this.onToggleLayerVisibility = options.onToggleLayerVisibility;
+    this.onRenameLayer = options.onRenameLayer;
+    this.onDeleteLayer = options.onDeleteLayer;
     this.onReorderLayer = options.onReorderLayer;
     this.element = document.createElement('div');
     this.element.className = 'hierarchy-panel';
@@ -70,8 +79,9 @@ export class HierarchyTree {
       const item = document.createElement('div');
       const isSelected = layer.id === selectedId;
       const isChild = !!layer.parent_id;
+      const isVisible = layer.visible !== false;
 
-      item.className = `layer-item ${isSelected ? 'active' : ''} ${isChild ? 'is-child' : ''}`;
+      item.className = `layer-item ${isSelected ? 'active' : ''} ${isChild ? 'is-child' : ''} ${!isVisible ? 'is-hidden' : ''}`;
       item.dataset.layerId = layer.id;
       item.dataset.index = String(index);
       item.setAttribute('draggable', 'true');
@@ -79,41 +89,129 @@ export class HierarchyTree {
 
       item.innerHTML = `
         <div class="layer-title-group">
+          <button class="btn-layer-action btn-layer-visibility ${isVisible ? 'is-visible' : 'is-hidden'}" title="${isVisible ? 'Ocultar capa' : 'Mostrar capa'}">
+            ${
+              isVisible
+                ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                     <circle cx="12" cy="12" r="3"></circle>
+                   </svg>`
+                : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                     <line x1="1" y1="1" x2="23" y2="23"></line>
+                   </svg>`
+            }
+          </button>
           <span class="layer-drag-handle" title="Arrastrar para reordenar">⋮⋮</span>
-          <span class="layer-name">
-            ${isChild ? '↳ ' : '● '}${layer.name}
+          <span class="layer-name-container">
+            ${isChild ? '<span class="layer-child-arrow">↳</span>' : ''}
+            <span class="layer-name" title="Doble clic para renombrar">${layer.name}</span>
           </span>
         </div>
         <div class="layer-actions">
           ${
             isChild
-              ? `<button class="btn-relative-toggle ${layer.relative_to_parent !== false ? 'active' : ''}" title="Posición relativa a la capa padre (Clic para alternar relativo/absoluto)">
-                   ${layer.relative_to_parent !== false ? '🔗 Rel' : '🔓 Abs'}
+              ? `<button class="btn-layer-action btn-relative-toggle ${layer.relative_to_parent !== false ? 'rel-parent' : 'free-movement'}" title="${layer.relative_to_parent !== false ? 'Movimiento relativo al padre (clic para movimiento libre)' : 'Movimiento libre (clic para relativo al padre)'}">
+                   ${
+                     layer.relative_to_parent !== false
+                       ? `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                          </svg>`
+                       : `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="5 9 2 12 5 15"></polyline>
+                            <polyline points="9 5 12 2 15 5"></polyline>
+                            <polyline points="15 19 12 22 9 19"></polyline>
+                            <polyline points="19 9 22 12 19 15"></polyline>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <line x1="12" y1="2" x2="12" y2="22"></line>
+                          </svg>`
+                   }
                  </button>`
               : ''
           }
-          ${
-            isSelected
-              ? `<button class="btn-pivot-toggle ${this.isPivotModeActive ? 'active' : ''}" title="Definir eje de giro (pivote) en el canvas">
-                   📍 Pivote
-                 </button>`
-              : ''
-          }
-          <span class="layer-z">Z: ${layer.z_index}</span>
+          <button class="btn-layer-action btn-layer-delete" title="Borrar capa" ${layers.length <= 1 ? 'disabled style="opacity: 0.3; cursor: not-allowed;"' : ''}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"></path>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+          <span class="layer-z">Z:${layer.z_index}</span>
         </div>
       `;
 
+      // Inline rename on double click
+      const nameSpan = item.querySelector('.layer-name') as HTMLElement;
+      nameSpan?.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        item.setAttribute('draggable', 'false');
+
+        const currentName = layer.name;
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'layer-rename-input';
+        input.value = currentName;
+
+        nameSpan.replaceWith(input);
+        input.focus();
+        input.select();
+
+        let committed = false;
+        const commit = () => {
+          if (committed) return;
+          committed = true;
+          const newName = input.value.trim();
+          if (newName && newName !== currentName) {
+            this.onRenameLayer?.(layer.id, newName);
+          } else {
+            input.replaceWith(nameSpan);
+            item.setAttribute('draggable', 'true');
+          }
+        };
+
+        const cancel = () => {
+          if (committed) return;
+          committed = true;
+          input.replaceWith(nameSpan);
+          item.setAttribute('draggable', 'true');
+        };
+
+        input.addEventListener('keydown', (ke) => {
+          ke.stopPropagation();
+          if (ke.key === 'Enter') {
+            commit();
+          } else if (ke.key === 'Escape') {
+            cancel();
+          }
+        });
+        input.addEventListener('click', (ke) => ke.stopPropagation());
+        input.addEventListener('blur', () => {
+          commit();
+        });
+      });
+
       item.addEventListener('click', (e) => {
         if (item.classList.contains('is-dragging')) return;
-        if ((e.target as HTMLElement).closest('.btn-relative-toggle')) {
+        const target = e.target as HTMLElement;
+
+        if (target.closest('.btn-layer-visibility')) {
+          e.stopPropagation();
+          this.onToggleLayerVisibility?.(layer.id);
+          return;
+        }
+        if (target.closest('.btn-relative-toggle')) {
           e.stopPropagation();
           this.onToggleLayerRelative?.(layer.id);
           return;
         }
-        // If clicking pivot button, don't re-select layer
-        if ((e.target as HTMLElement).closest('.btn-pivot-toggle')) {
+        if (target.closest('.btn-layer-delete')) {
           e.stopPropagation();
-          this.onTogglePivotMode?.();
+          if (layers.length > 1) {
+            this.onDeleteLayer?.(layer.id);
+          }
+          return;
+        }
+        if (target.closest('.layer-rename-input')) {
           return;
         }
         this.onSelectLayer?.(layer.id);

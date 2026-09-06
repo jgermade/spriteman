@@ -58,6 +58,10 @@ export interface FrameStripOptions {
   onAddAnimation?: () => void;
   onRenameAnimation?: (animId: string, name: string) => void;
   onDeleteAnimation?: (animId: string) => void;
+
+  // History callbacks
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
 export class FrameStrip {
@@ -74,6 +78,8 @@ export class FrameStrip {
   private layerGroups: FrameGroupItem[] = [];
   private activeGroup: FrameGroupItem | null = null;
   private isPivotMode: boolean = false;
+  private canUndo: boolean = false;
+  private canRedo: boolean = false;
 
   private selectedRange: { start: number; end: number } | null = null;
   private lastClickedFrame: number = 0;
@@ -97,6 +103,8 @@ export class FrameStrip {
   private onAddAnimation?: () => void;
   private onRenameAnimation?: (animId: string, name: string) => void;
   private onDeleteAnimation?: (animId: string) => void;
+  private onUndo?: () => void;
+  private onRedo?: () => void;
 
   constructor(options: FrameStripOptions = {}) {
     this.totalFrames = options.totalFrames ?? 4;
@@ -131,6 +139,8 @@ export class FrameStrip {
     this.onAddAnimation = options.onAddAnimation;
     this.onRenameAnimation = options.onRenameAnimation;
     this.onDeleteAnimation = options.onDeleteAnimation;
+    this.onUndo = options.onUndo;
+    this.onRedo = options.onRedo;
 
     this.element = document.createElement('div');
     this.element.className = 'framestrip-container';
@@ -152,7 +162,9 @@ export class FrameStrip {
     activeAnimationId?: string,
     layerGroups?: FrameGroupItem[],
     activeGroup?: FrameGroupItem | null,
-    isPivotMode?: boolean
+    isPivotMode?: boolean,
+    canUndo?: boolean,
+    canRedo?: boolean
   ): void {
     this.currentFrame = currentFrame;
     this.totalFrames = totalFrames;
@@ -165,6 +177,8 @@ export class FrameStrip {
     if (layerGroups !== undefined) this.layerGroups = layerGroups;
     if (activeGroup !== undefined) this.activeGroup = activeGroup;
     if (isPivotMode !== undefined) this.isPivotMode = isPivotMode;
+    if (canUndo !== undefined) this.canUndo = canUndo;
+    if (canRedo !== undefined) this.canRedo = canRedo;
     this.render();
   }
 
@@ -212,36 +226,52 @@ export class FrameStrip {
           <button class="btn-tool btn-next" title="Next Frame">⏭</button>
         </div>
 
+        <div class="history-actions-group">
+          <button class="btn-tool icon-only btn-undo" title="Deshacer (Cmd+Z / Ctrl+Z)" ${!this.canUndo ? 'disabled' : ''}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 7v6h6"></path>
+              <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+            </svg>
+          </button>
+          <button class="btn-tool icon-only btn-redo" title="Rehacer (Cmd+Shift+Z / Ctrl+Shift+Z)" ${!this.canRedo ? 'disabled' : ''}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 7v6h-6"></path>
+              <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"></path>
+            </svg>
+          </button>
+        </div>
+
         <div class="frame-actions-group">
-          <button class="btn-tool btn-add primary" title="Add new frame (copies previous)">
-            + Add Frame
+          <button class="btn-tool icon-only btn-duplicate" title="Duplicar fotograma actual">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
           </button>
-          <button class="btn-tool btn-duplicate" title="Duplicate selected frame">
-            Duplicate
+          <button class="btn-tool icon-only btn-delete" title="Eliminar fotograma actual" ${this.totalFrames <= 1 ? 'disabled' : ''}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"></path>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
           </button>
-          <button class="btn-tool btn-delete" title="Delete current frame" ${this.totalFrames <= 1 ? 'disabled' : ''}>
-            Delete
-          </button>
-          <button class="btn-tool btn-onion ${this.onionSkin ? 'active' : ''}" title="Toggle Onion Skinning">
-            🧅 Onion Skin
+          <button class="btn-tool icon-only btn-onion ${this.onionSkin ? 'active' : ''}" title="Papel cebolla (Onion Skinning)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2C12 2 8 6 8 6C5.5 8.5 4 11.5 4 14.5C4 19 7.6 22 12 22C16.4 22 20 19 20 14.5C20 11.5 18.5 8.5 16 6L12 2Z"></path>
+              <path d="M12 6C12 6 9.5 9 9.5 9C8 10.5 7 12.5 7 14.5C7 17.5 9.2 19.5 12 19.5C14.8 19.5 17 17.5 17 14.5C17 12.5 16 10.5 14.5 9L12 6Z" opacity="0.5"></path>
+            </svg>
           </button>
 
           ${
             hasRangeSelection
-              ? `<button class="btn-tool btn-group-selection primary" title="Crear grupo de fotogramas en esta capa con pivote e interpolación independiente">
-                   📦 Agrupar (${rangeStart + 1}..${rangeEnd + 1})
+              ? `<button class="btn-tool icon-only btn-group-selection primary" title="Agrupar fotogramas seleccionados (${rangeStart + 1}..${rangeEnd + 1}) con pivote e interpolación automática">
+                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                     <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                     <polyline points="3.29 7 12 12 20.71 7"></polyline>
+                     <line x1="12" y1="22" x2="12" y2="12"></line>
+                   </svg>
                  </button>`
-              : this.activeGroup
-              ? `<div class="active-group-pill">
-                   <span class="group-pill-name">📦 ${this.activeGroup.name || 'Grupo'} (${this.activeGroup.start_frame + 1}..${this.activeGroup.end_frame + 1})</span>
-                   <button class="btn-tool btn-group-pivot ${this.isPivotMode ? 'active' : ''}" title="Ubicar eje de giro (pivote) en el canvas para este grupo">
-                     📍 ${this.activeGroup.pivot ? `Pivote [${this.activeGroup.pivot.x}, ${this.activeGroup.pivot.y}]` : 'Ubicar Pivote'}
-                   </button>
-                   <button class="btn-tool btn-group-interpolate" title="Interpolar fotogramas intermedios de este grupo" ${this.activeGroup.end_frame - this.activeGroup.start_frame < 2 ? 'disabled' : ''}>
-                     ⚡ Interpolar
-                   </button>
-                   <button class="btn-tool btn-group-ungroup" title="Desagrupar fotogramas">✕ Desagrupar</button>
-                 </div>`
               : ''
           }
         </div>
@@ -278,7 +308,8 @@ export class FrameStrip {
     this.element.querySelector('.btn-play')?.addEventListener('click', () => this.onTogglePlay?.());
     this.element.querySelector('.btn-prev')?.addEventListener('click', () => this.onStep?.(-1));
     this.element.querySelector('.btn-next')?.addEventListener('click', () => this.onStep?.(1));
-    this.element.querySelector('.btn-add')?.addEventListener('click', () => this.onAddFrame?.());
+    this.element.querySelector('.btn-undo')?.addEventListener('click', () => this.onUndo?.());
+    this.element.querySelector('.btn-redo')?.addEventListener('click', () => this.onRedo?.());
     this.element.querySelector('.btn-duplicate')?.addEventListener('click', () => this.onDuplicateFrame?.());
     this.element.querySelector('.btn-delete')?.addEventListener('click', () => this.onDeleteFrame?.());
 
@@ -290,19 +321,6 @@ export class FrameStrip {
           this.selectedRange = null;
           this.onGroupFrames?.(s, e);
         }
-      });
-    }
-
-    if (this.activeGroup) {
-      const grpId = this.activeGroup.id;
-      this.element.querySelector('.btn-group-pivot')?.addEventListener('click', () => {
-        this.onToggleGroupPivotMode?.();
-      });
-      this.element.querySelector('.btn-group-interpolate')?.addEventListener('click', () => {
-        this.onInterpolateGroup?.(grpId);
-      });
-      this.element.querySelector('.btn-group-ungroup')?.addEventListener('click', () => {
-        this.onUngroupFrames?.(grpId);
       });
     }
 
@@ -349,26 +367,28 @@ export class FrameStrip {
       setInsertIndicator(null);
     };
 
-    // 1. Create standard existing frame cells with miniature canvas preview & reorder drag
-    for (let i = 0; i < this.totalFrames; i++) {
+    const buildCell = (i: number, cellGroup?: FrameGroupItem, isIntermediate: boolean = false): HTMLElement => {
       const cell = document.createElement('button');
       const isActive = i === activeIntFrame;
       const isInRange =
         this.selectedRange !== null && i >= this.selectedRange.start && i <= this.selectedRange.end;
 
-      const cellGroup = this.layerGroups.find((g) => i >= g.start_frame && i <= g.end_frame);
       const inGroup = !!cellGroup;
       const isGroupStart = inGroup && i === cellGroup.start_frame;
       const isGroupEnd = inGroup && i === cellGroup.end_frame;
       const hasGroupPivot = inGroup && !!cellGroup.pivot;
 
-      cell.className = `frame-cell ${isActive ? 'active' : ''} ${isInRange ? 'in-range-selected' : ''} ${inGroup ? 'in-group' : ''} ${isGroupStart ? 'group-start' : ''} ${isGroupEnd ? 'group-end' : ''}`;
+      cell.className = `frame-cell ${isActive ? 'active' : ''} ${isInRange ? 'in-range-selected' : ''} ${inGroup ? 'in-group' : ''} ${isGroupStart ? 'group-start' : ''} ${isGroupEnd ? 'group-end' : ''} ${isIntermediate ? 'group-intermediate' : ''}`;
       cell.dataset.frameIndex = String(i);
-      cell.setAttribute('draggable', 'true');
+      if (!isIntermediate) {
+        cell.setAttribute('draggable', 'true');
+      }
       cell.setAttribute(
         'title',
-        inGroup
-          ? `Frame ${i + 1} (${cellGroup.name || 'Grupo'}${hasGroupPivot ? ` • Pivote: [${cellGroup.pivot!.x}, ${cellGroup.pivot!.y}]` : ''})`
+        isIntermediate
+          ? `Fotograma ${i + 1} (Intermedio automático de ${cellGroup?.name || 'Grupo'}, no editable)`
+          : inGroup
+          ? `Frame ${i + 1} (${cellGroup?.name || 'Grupo'}${hasGroupPivot ? ` • Pivote: [${cellGroup?.pivot!.x}, ${cellGroup?.pivot!.y}]` : ''})`
           : `Frame ${i + 1} (Shift+Click to select range, Drag to reorder)`
       );
 
@@ -378,7 +398,12 @@ export class FrameStrip {
       numSpan.textContent = String(i + 1);
       cell.appendChild(numSpan);
 
-      if (hasGroupPivot) {
+      if (isIntermediate) {
+        const lockBadge = document.createElement('span');
+        lockBadge.className = 'cell-intermediate-lock';
+        lockBadge.textContent = '🔒';
+        cell.appendChild(lockBadge);
+      } else if (hasGroupPivot) {
         const pivotDot = document.createElement('span');
         pivotDot.className = 'cell-pivot-dot';
         pivotDot.setAttribute('title', `Pivote: [${cellGroup!.pivot!.x}, ${cellGroup!.pivot!.y}]`);
@@ -403,7 +428,7 @@ export class FrameStrip {
       cell.addEventListener('click', (e: MouseEvent) => {
         if (cell.classList.contains('is-dragging')) return;
 
-        if (e.shiftKey) {
+        if (e.shiftKey && !isIntermediate) {
           const start = Math.min(this.lastClickedFrame, i);
           const end = Math.max(this.lastClickedFrame, i);
           this.selectedRange = { start, end };
@@ -419,32 +444,111 @@ export class FrameStrip {
         }
       });
 
-      // Dragstart for reordering existing frame
-      cell.addEventListener('dragstart', (e: DragEvent) => {
-        cell.classList.add('is-dragging');
-        reel.classList.add('reel-drag-active');
-        if (e.dataTransfer) {
-          e.dataTransfer.setData('application/json', JSON.stringify({ type: 'reorder', fromIndex: i }));
-          e.dataTransfer.effectAllowed = 'move';
+      if (!isIntermediate) {
+        // Dragstart for reordering existing frame
+        cell.addEventListener('dragstart', (e: DragEvent) => {
+          cell.classList.add('is-dragging');
+          reel.classList.add('reel-drag-active');
+          if (e.dataTransfer) {
+            e.dataTransfer.setData('application/json', JSON.stringify({ type: 'reorder', fromIndex: i }));
+            e.dataTransfer.effectAllowed = 'move';
+          }
+        });
+
+        cell.addEventListener('dragend', () => {
+          cleanupDrag();
+        });
+
+        // Dragover on existing cell to position insertion point before or after
+        cell.addEventListener('dragover', (e: DragEvent) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+          const rect = cell.getBoundingClientRect();
+          const isRightHalf = e.clientX > rect.left + rect.width / 2;
+          const insertIdx = isRightHalf ? i + 1 : i;
+          setInsertIndicator(insertIdx);
+        });
+      }
+
+      return cell;
+    };
+
+    // 1. Create standard existing frame cells or group-intermediate-wrapper
+    let frameIdx = 0;
+    while (frameIdx < this.totalFrames) {
+      const matchingGroup = this.layerGroups.find(
+        (g) => frameIdx > g.start_frame && frameIdx < g.end_frame
+      );
+
+      if (matchingGroup && frameIdx === matchingGroup.start_frame + 1) {
+        // Build the group-intermediate-wrapper containing the pill on top and intermediate cells underneath
+        const groupWrapper = document.createElement('div');
+        groupWrapper.className = 'group-intermediate-wrapper';
+
+        const isGroupActive = this.activeGroup?.id === matchingGroup.id;
+
+        const pill = document.createElement('div');
+        pill.className = `active-group-pill in-reel ${isGroupActive ? 'active' : ''}`;
+        pill.innerHTML = `
+          <span class="group-pill-name" title="${matchingGroup.name || 'Grupo'} (Fotogramas ${matchingGroup.start_frame + 1}..${matchingGroup.end_frame + 1})">⚡ ${matchingGroup.name || 'Grupo'}</span>
+          <div class="group-pill-actions">
+            <button class="btn-group-action btn-group-pivot ${this.isPivotMode && isGroupActive ? 'active' : ''}" title="Ubicar eje de giro (pivote) en el canvas">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <line x1="12" y1="2" x2="12" y2="6"></line>
+                <line x1="12" y1="18" x2="12" y2="22"></line>
+                <line x1="2" y1="12" x2="6" y2="12"></line>
+                <line x1="18" y1="12" x2="22" y2="12"></line>
+              </svg>
+            </button>
+            <button class="btn-group-action btn-group-ungroup" title="Desagrupar fotogramas">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        `;
+
+        pill.querySelector('.btn-group-pivot')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onToggleGroupPivotMode?.();
+        });
+
+        pill.querySelector('.btn-group-ungroup')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.onUngroupFrames?.(matchingGroup.id);
+        });
+
+        pill.addEventListener('click', (e) => {
+          if ((e.target as HTMLElement).closest('.btn-group-action')) return;
+          this.currentFrame = matchingGroup.start_frame;
+          this.render();
+          this.onSelectFrame?.(matchingGroup.start_frame);
+        });
+
+        groupWrapper.appendChild(pill);
+
+        const cellsContainer = document.createElement('div');
+        cellsContainer.className = 'group-intermediate-cells';
+
+        // Add all intermediate cells for this group
+        while (frameIdx < matchingGroup.end_frame && frameIdx < this.totalFrames) {
+          const cell = buildCell(frameIdx, matchingGroup, true);
+          cellsContainer.appendChild(cell);
+          cellElements.push(cell);
+          frameIdx++;
         }
-      });
 
-      cell.addEventListener('dragend', () => {
-        cleanupDrag();
-      });
-
-      // Dragover on existing cell to position insertion point before or after
-      cell.addEventListener('dragover', (e: DragEvent) => {
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        const rect = cell.getBoundingClientRect();
-        const isRightHalf = e.clientX > rect.left + rect.width / 2;
-        const insertIdx = isRightHalf ? i + 1 : i;
-        setInsertIndicator(insertIdx);
-      });
-
-      reel.appendChild(cell);
-      cellElements.push(cell);
+        groupWrapper.appendChild(cellsContainer);
+        reel.appendChild(groupWrapper);
+      } else {
+        const cellGroup = this.layerGroups.find((g) => frameIdx >= g.start_frame && frameIdx <= g.end_frame);
+        const cell = buildCell(frameIdx, cellGroup, false);
+        reel.appendChild(cell);
+        cellElements.push(cell);
+        frameIdx++;
+      }
     }
 
     // 2. Create .frame-cell.new at the right of the last frame cell

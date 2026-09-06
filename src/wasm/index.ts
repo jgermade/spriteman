@@ -2,6 +2,7 @@
  * WebAssembly engine wrapper and initializer.
  */
 import initWasm, { SpritemotionWasm } from './pkg/spritemotion.js';
+import wasmUrl from './pkg/spritemotion_bg.wasm?url';
 
 export interface RenderItem {
   layer_id: string;
@@ -24,7 +25,7 @@ let wasmInitPromise: Promise<void> | null = null;
 
 export async function ensureWasmInitialized(): Promise<void> {
   if (!wasmInitPromise) {
-    wasmInitPromise = initWasm().then(() => undefined);
+    wasmInitPromise = initWasm(wasmUrl).then(() => undefined);
   }
   return wasmInitPromise;
 }

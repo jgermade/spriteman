@@ -96,10 +96,60 @@ class ProjectService {
     rawJson: '',
   };
   private listeners: Set<ProjectListener> = new Set();
+  private undoStack: string[] = [];
+  private redoStack: string[] = [];
+  private readonly maxHistoryLength = 50;
+
+  public clearHistory(): void {
+    this.undoStack = [];
+    this.redoStack = [];
+  }
+
+  private pushUndoSnapshot(): void {
+    if (!this.state.rawJson) {
+      this.updateJson();
+    }
+    this.undoStack.push(this.state.rawJson);
+    if (this.undoStack.length > this.maxHistoryLength) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  public canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  public canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
+  public undo(): boolean {
+    if (this.undoStack.length === 0) return false;
+    if (!this.state.rawJson) {
+      this.updateJson();
+    }
+    this.redoStack.push(this.state.rawJson);
+    const prevJson = this.undoStack.pop()!;
+    this.setProjectJson(prevJson);
+    return true;
+  }
+
+  public redo(): boolean {
+    if (this.redoStack.length === 0) return false;
+    if (!this.state.rawJson) {
+      this.updateJson();
+    }
+    this.undoStack.push(this.state.rawJson);
+    const nextJson = this.redoStack.pop()!;
+    this.setProjectJson(nextJson);
+    return true;
+  }
 
   public async loadFromUrl(url: string): Promise<string> {
     const res = await fetch(url);
     const text = await res.text();
+    this.clearHistory();
     this.setProjectJson(text);
     return text;
   }
@@ -108,6 +158,7 @@ class ProjectService {
    * Creates a brand new animation project with a single initial frame (total_frames: 1).
    */
   public createNewProject(name: string, width: number, height: number, fps: number = 12): string {
+    this.clearHistory();
     const project = {
       version: '1.0.0',
       meta: {
@@ -226,6 +277,7 @@ class ProjectService {
   }
 
   public setCanvasSize(width: number, height: number): void {
+    this.pushUndoSnapshot();
     this.state.meta.canvas_width = width;
     this.state.meta.canvas_height = height;
     this.updateJson();
@@ -233,6 +285,7 @@ class ProjectService {
   }
 
   public setFps(fps: number): void {
+    this.pushUndoSnapshot();
     this.state.meta.fps = fps;
     this.updateJson();
     this.notify();
@@ -241,6 +294,7 @@ class ProjectService {
   public setLayerColor(layerId: string, color: string): void {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (layer) {
+      this.pushUndoSnapshot();
       layer.color = color;
       this.updateJson();
       this.notify();
@@ -252,6 +306,7 @@ class ProjectService {
    * and copying the preceding frame's content/keyframes by default.
    */
   public insertFrame(targetIndex: number, copyPrevious = true): number {
+    this.pushUndoSnapshot();
     const currentTotal = this.state.meta.total_frames;
     const insertIndex = Math.max(0, Math.min(targetIndex, currentTotal));
 
@@ -411,6 +466,7 @@ class ProjectService {
    * Duplicates the specified frame into a new frame.
    */
   public duplicateFrame(frameIndex: number): number {
+    this.pushUndoSnapshot();
     const newFrameIndex = this.state.meta.total_frames;
     this.state.meta.total_frames += 1;
 
@@ -438,6 +494,7 @@ class ProjectService {
    */
   public deleteFrame(frameIndex: number): void {
     if (this.state.meta.total_frames <= 1) return;
+    this.pushUndoSnapshot();
 
     this.state.layers.forEach((layer) => {
       if (!layer.tracks) return;
@@ -485,6 +542,7 @@ class ProjectService {
    * Adds a new layer to the project.
    */
   public addLayer(name?: string, parentId: string | null = null): string {
+    this.pushUndoSnapshot();
     const layerIndex = this.state.layers.length + 1;
     const id = `layer_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const layerName = name || `Layer ${layerIndex}`;
@@ -536,6 +594,64 @@ class ProjectService {
   }
 
   /**
+   * Deletes a layer by id. Re-parents orphan child layers to the deleted layer's parent.
+   */
+  public deleteLayer(layerId: string): boolean {
+    if (this.state.layers.length <= 1) return false;
+    const idx = this.state.layers.findIndex((l) => l.id === layerId);
+    if (idx === -1) return false;
+
+    this.pushUndoSnapshot();
+    const deleted = this.state.layers[idx];
+    this.state.layers.forEach((l) => {
+      if (l.parent_id === layerId) {
+        l.parent_id = deleted.parent_id;
+      }
+    });
+
+    this.state.layers.splice(idx, 1);
+    this.state.layers.forEach((l, i) => {
+      l.z_index = i;
+    });
+
+    if (this.state.selectedLayerId === layerId) {
+      const nextLayer = this.state.layers[Math.min(idx, this.state.layers.length - 1)];
+      this.state.selectedLayerId = nextLayer ? nextLayer.id : null;
+    }
+
+    this.updateJson();
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Renames a layer.
+   */
+  public renameLayer(layerId: string, name: string): void {
+    const layer = this.state.layers.find((l) => l.id === layerId);
+    const trimmed = name.trim();
+    if (layer && trimmed && layer.name !== trimmed) {
+      this.pushUndoSnapshot();
+      layer.name = trimmed;
+      this.updateJson();
+      this.notify();
+    }
+  }
+
+  /**
+   * Toggles visibility of a layer (show / hide).
+   */
+  public toggleLayerVisibility(layerId: string): void {
+    const layer = this.state.layers.find((l) => l.id === layerId);
+    if (layer) {
+      this.pushUndoSnapshot();
+      layer.visible = layer.visible === false ? true : false;
+      this.updateJson();
+      this.notify();
+    }
+  }
+
+  /**
    * Reorders a layer to targetIndex, optionally updating its parent_id.
    * Prevents circular hierarchy dependencies and updates all layer z_index values.
    */
@@ -554,6 +670,7 @@ class ProjectService {
       }
     }
 
+    this.pushUndoSnapshot();
     const [movedLayer] = this.state.layers.splice(currentIndex, 1);
     movedLayer.parent_id = newParentId;
 
@@ -575,6 +692,7 @@ class ProjectService {
   public setLayerPivot(layerId: string, pivotX: number, pivotY: number): void {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (layer) {
+      this.pushUndoSnapshot();
       if (!layer.default_transform) {
         layer.default_transform = {
           x: Math.round(this.state.meta.canvas_width / 2),
@@ -600,6 +718,7 @@ class ProjectService {
   public toggleLayerRelative(layerId: string): void {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (layer && layer.parent_id) {
+      this.pushUndoSnapshot();
       layer.relative_to_parent = layer.relative_to_parent === false ? true : false;
       this.updateJson();
       this.notify();
@@ -613,6 +732,7 @@ class ProjectService {
   public translateLayer(layerId: string, deltaX: number, deltaY: number, frameIndex?: number): void {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (!layer) return;
+    this.pushUndoSnapshot();
 
     if (!layer.default_transform) {
       layer.default_transform = {
@@ -651,6 +771,30 @@ class ProjectService {
       }
     }
 
+    if (layer.pivot) {
+      layer.pivot.x += deltaX;
+      layer.pivot.y += deltaY;
+    }
+
+    // Shift pixels on current frame
+    if (typeof frameIndex === 'number' && this.state.frame_pixels[frameIndex]) {
+      const oldMap = this.state.frame_pixels[frameIndex];
+      const newMap: Record<string, string> = {};
+      for (const [key, color] of Object.entries(oldMap)) {
+        const comma = key.indexOf(',');
+        if (comma === -1) continue;
+        const px = parseInt(key.slice(0, comma), 10);
+        const py = parseInt(key.slice(comma + 1), 10);
+        const nx = px + deltaX;
+        const ny = py + deltaY;
+        if (nx >= 0 && nx < this.state.meta.canvas_width && ny >= 0 && ny < this.state.meta.canvas_height) {
+          newMap[`${nx},${ny}`] = color;
+        }
+      }
+      this.state.frame_pixels[frameIndex] = newMap;
+      this.autoRecalculateGroupsForFrame(frameIndex);
+    }
+
     this.updateJson();
     this.notify();
   }
@@ -664,6 +808,7 @@ class ProjectService {
     if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= total || toIndex < 0 || toIndex >= total) {
       return;
     }
+    this.pushUndoSnapshot();
 
     // Reorder frame_pixels
     const framesArray: Array<Record<string, string>> = [];
@@ -787,16 +932,30 @@ class ProjectService {
     return this.state.frame_pixels[frameIndex] || {};
   }
 
+  private autoRecalculateGroupsForFrame(frameIndex: number): void {
+    for (const layer of this.state.layers) {
+      if (!layer.groups) continue;
+      for (const grp of layer.groups) {
+        if (grp.start_frame === frameIndex || grp.end_frame === frameIndex) {
+          this.interpolateMotion(grp.start_frame, grp.end_frame);
+        }
+      }
+    }
+  }
+
   public setPixel(frameIndex: number, x: number, y: number, color: string): void {
+    this.pushUndoSnapshot();
     if (!this.state.frame_pixels[frameIndex]) {
       this.state.frame_pixels[frameIndex] = {};
     }
     this.state.frame_pixels[frameIndex][`${x},${y}`] = color;
+    this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
   }
 
   public setPixels(frameIndex: number, pixels: Array<{ x: number; y: number }>, color: string): void {
+    this.pushUndoSnapshot();
     if (!this.state.frame_pixels[frameIndex]) {
       this.state.frame_pixels[frameIndex] = {};
     }
@@ -804,13 +963,16 @@ class ProjectService {
     for (const p of pixels) {
       map[`${p.x},${p.y}`] = color;
     }
+    this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
   }
 
   public erasePixel(frameIndex: number, x: number, y: number): void {
     if (this.state.frame_pixels[frameIndex]) {
+      this.pushUndoSnapshot();
       delete this.state.frame_pixels[frameIndex][`${x},${y}`];
+      this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
     }
@@ -818,10 +980,12 @@ class ProjectService {
 
   public erasePixels(frameIndex: number, pixels: Array<{ x: number; y: number }>): void {
     if (this.state.frame_pixels[frameIndex]) {
+      this.pushUndoSnapshot();
       const map = this.state.frame_pixels[frameIndex];
       for (const p of pixels) {
         delete map[`${p.x},${p.y}`];
       }
+      this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
     }
@@ -831,6 +995,7 @@ class ProjectService {
   public createFrameGroup(layerId: string, startFrame: number, endFrame: number, name?: string): LayerFrameGroup | null {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (!layer) return null;
+    this.pushUndoSnapshot();
     if (!layer.groups) layer.groups = [];
 
     const start = Math.min(startFrame, endFrame);
@@ -849,6 +1014,9 @@ class ProjectService {
     layer.groups.push(newGroup);
     layer.groups.sort((a, b) => a.start_frame - b.start_frame);
 
+    // Automatically calculate interpolation across the newly created group!
+    this.interpolateMotion(start, end);
+
     this.updateJson();
     this.notify();
     return newGroup;
@@ -857,6 +1025,7 @@ class ProjectService {
   public deleteFrameGroup(layerId: string, groupId: string): void {
     const layer = this.state.layers.find((l) => l.id === layerId);
     if (!layer || !layer.groups) return;
+    this.pushUndoSnapshot();
     layer.groups = layer.groups.filter((g) => g.id !== groupId);
     this.updateJson();
     this.notify();
@@ -867,6 +1036,7 @@ class ProjectService {
     if (!layer || !layer.groups) return;
     const grp = layer.groups.find((g) => g.id === groupId);
     if (grp) {
+      this.pushUndoSnapshot();
       grp.pivot = { x: pivotX, y: pivotY };
       this.updateJson();
       this.notify();
@@ -907,6 +1077,7 @@ class ProjectService {
   }
 
   public addAnimation(name?: string): string {
+    this.pushUndoSnapshot();
     this.syncActiveAnimation();
     const count = this.state.animations.length + 1;
     const id = `anim_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -948,6 +1119,7 @@ class ProjectService {
   public renameAnimation(animId: string, name: string): void {
     const clip = this.state.animations.find((a) => a.id === animId);
     if (clip) {
+      this.pushUndoSnapshot();
       clip.name = name.trim() || clip.name;
       this.updateJson();
       this.notify();
@@ -959,6 +1131,7 @@ class ProjectService {
     const idx = this.state.animations.findIndex((a) => a.id === animId);
     if (idx === -1) return;
 
+    this.pushUndoSnapshot();
     this.state.animations.splice(idx, 1);
     if (this.state.activeAnimationId === animId) {
       const nextClip = this.state.animations[Math.max(0, idx - 1)];

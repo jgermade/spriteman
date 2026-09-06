@@ -124,6 +124,13 @@ export class PixelPalette {
     });
   }
 
+  private getColorPreviewStyle(color: string): string {
+    if (color === '__eraser__') {
+      return 'background: linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%); background-size: 6px 6px; background-position: 0 0, 0 3px, 3px -3px, -3px 0; background-color: #fff;';
+    }
+    return `background-color: ${color}`;
+  }
+
   private render(): void {
     this.element.innerHTML = `
       <div class="panel-header palette-header-dual">
@@ -131,12 +138,12 @@ export class PixelPalette {
         <div class="dual-color-slots">
           <div class="color-slot-display" title="Color I (Izquierdo): Clic en cualquier muestra">
             <span class="slot-tag">I</span>
-            <span class="slot-color-preview" style="background-color: ${this.primaryColor}"></span>
+            <span class="slot-color-preview" style="${this.getColorPreviewStyle(this.primaryColor)}"></span>
           </div>
           <button class="btn-swap-colors ${this.isTempSwapped ? 'active' : ''}" title="Intercambiar colores [X] (o mantener CMD/ALT)">⇄</button>
           <div class="color-slot-display" title="Color D (Derecho): Clic Derecho en cualquier muestra">
             <span class="slot-tag">D</span>
-            <span class="slot-color-preview" style="background-color: ${this.secondaryColor}"></span>
+            <span class="slot-color-preview" style="${this.getColorPreviewStyle(this.secondaryColor)}"></span>
           </div>
         </div>
       </div>
@@ -150,6 +157,27 @@ export class PixelPalette {
     });
 
     const swatchesContainer = this.element.querySelector('.palette-swatches')!;
+
+    // Eraser swatch — special sentinel color to erase pixels
+    const eraserSwatch = document.createElement('button');
+    const isEraserPrimary = this.primaryColor === '__eraser__';
+    const isEraserSecondary = this.secondaryColor === '__eraser__';
+    eraserSwatch.className = `palette-swatch eraser ${isEraserPrimary ? 'selected-primary' : ''} ${isEraserSecondary ? 'selected-secondary' : ''}`;
+    eraserSwatch.title = 'Borrador — Borra píxeles\n• Clic Izq: Color I\n• Clic Der: Color D';
+    eraserSwatch.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.6 1.6c.8-.8 2-.8 2.8 0L21 5.2c.8.8.8 2 0 2.8L11 18"></path><line x1="18" y1="13" x2="11" y2="20"></line></svg>${isEraserPrimary && isEraserSecondary ? '<span class="swatch-badge dual">I|D</span>' : isEraserPrimary ? '<span class="swatch-badge primary">I</span>' : isEraserSecondary ? '<span class="swatch-badge secondary">D</span>' : ''}`;
+
+    eraserSwatch.addEventListener('click', (e: MouseEvent) => {
+      if (e.metaKey || e.altKey) {
+        this.setSecondaryColor('__eraser__');
+      } else {
+        this.setPrimaryColor('__eraser__');
+      }
+    });
+    eraserSwatch.addEventListener('contextmenu', (e: MouseEvent) => {
+      e.preventDefault();
+      this.setSecondaryColor('__eraser__');
+    });
+    swatchesContainer.appendChild(eraserSwatch);
 
     PIXEL_ART_PALETTE.forEach((color) => {
       const isPrimary = color.toLowerCase() === this.primaryColor.toLowerCase();
