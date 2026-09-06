@@ -1,0 +1,22 @@
+[package]
+name = "spritemotion"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jesús Germade <jesus@germade.es>"]
+description = "2D animated sprite editor core with hierarchical layers, keyframe interpolation, and WASM bindings."
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+default = ["wasm"]
+wasm = ["dep:wasm-bindgen"]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

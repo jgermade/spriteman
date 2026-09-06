@@ -1,0 +1,138 @@
+{
+  "version": "1.0.0",
+  "meta": {
+    "name": "sample_character_anim",
+    "fps": 24,
+    "total_frames": 24,
+    "canvas_width": 128,
+    "canvas_height": 128
+  },
+  "sheets": [
+    {
+      "id": "hero_sheet",
+      "image": "assets/hero.png",
+      "frames": {
+        "torso": {
+          "x": 0,
+          "y": 0,
+          "w": 32,
+          "h": 32,
+          "pivot": { "x": 0.5, "y": 0.5 }
+        },
+        "head": {
+          "x": 32,
+          "y": 0,
+          "w": 24,
+          "h": 24,
+          "pivot": { "x": 0.5, "y": 0.9 }
+        },
+        "arm_left": {
+          "x": 56,
+          "y": 0,
+          "w": 12,
+          "h": 24,
+          "pivot": { "x": 0.5, "y": 0.15 }
+        }
+      }
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer_torso",
+      "name": "Torso",
+      "parent_id": null,
+      "z_index": 1,
+      "visible": true,
+      "sheet_id": "hero_sheet",
+      "default_frame": "torso",
+      "default_transform": {
+        "x": 64.0,
+        "y": 64.0,
+        "rotation": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "opacity": 1.0,
+        "pivot": { "x": 0.5, "y": 0.5 }
+      },
+      "tracks": {
+        "position": [
+          { "frame": 0.0, "value": [64.0, 64.0], "easing": "easeInOut" },
+          { "frame": 12.0, "value": [64.0, 60.0], "easing": "easeInOut" },
+          { "frame": 24.0, "value": [64.0, 64.0], "easing": "easeInOut" }
+        ],
+        "rotation": [
+          { "frame": 0.0, "value": 0.0, "easing": "linear" },
+          { "frame": 12.0, "value": 2.0, "easing": "linear" },
+          { "frame": 24.0, "value": 0.0, "easing": "linear" }
+        ],
+        "scale": [],
+        "opacity": [],
+        "sprite_frame": [
+          { "frame": 0.0, "value": "torso", "easing": "step" }
+        ]
+      }
+    },
+    {
+      "id": "layer_head",
+      "name": "Head",
+      "parent_id": "layer_torso",
+      "z_index": 2,
+      "visible": true,
+      "sheet_id": "hero_sheet",
+      "default_frame": "head",
+      "default_transform": {
+        "x": 0.0,
+        "y": -16.0,
+        "rotation": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "opacity": 1.0,
+        "pivot": { "x": 0.5, "y": 0.9 }
+      },
+      "tracks": {
+        "position": [],
+        "rotation": [
+          { "frame": 0.0, "value": -3.0, "easing": "easeInOut" },
+          { "frame": 12.0, "value": 5.0, "easing": "easeInOut" },
+          { "frame": 24.0, "value": -3.0, "easing": "easeInOut" }
+        ],
+        "scale": [],
+        "opacity": [],
+        "sprite_frame": [
+          { "frame": 0.0, "value": "head", "easing": "step" }
+        ]
+      }
+    },
+    {
+      "id": "layer_arm_l",
+      "name": "Left Arm",
+      "parent_id": "layer_torso",
+      "z_index": 0,
+      "visible": true,
+      "sheet_id": "hero_sheet",
+      "default_frame": "arm_left",
+      "default_transform": {
+        "x": -12.0,
+        "y": -8.0,
+        "rotation": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "opacity": 1.0,
+        "pivot": { "x": 0.5, "y": 0.15 }
+      },
+      "tracks": {
+        "position": [],
+        "rotation": [
+          { "frame": 0.0, "value": -25.0, "easing": "easeInOut" },
+          { "frame": 12.0, "value": 25.0, "easing": "easeInOut" },
+          { "frame": 24.0, "value": -25.0, "easing": "easeInOut" }
+        ],
+        "scale": [],
+        "opacity": [],
+        "sprite_frame": [
+          { "frame": 0.0, "value": "arm_left", "easing": "step" }
+        ]
+      }
+    }
+  ]
+}

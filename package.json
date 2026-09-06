@@ -1,0 +1,19 @@
+{
+  "name": "spritemotion",
+  "version": "0.1.0",
+  "description": "2D animated sprite editor core with hierarchical layers, keyframe interpolation, and WASM bindings.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:wasm": "wasm-pack build engine --target web --out-dir ../src/wasm/pkg",
+    "build:web": "vite build",
+    "build": "npm run build:wasm && npm run build:web",
+    "test": "cargo test"
+  },
+  "dependencies": {
+    "jq79": "^0.7.0"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
+}

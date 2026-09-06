@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spritemotion — Project Roadmap & Gantt (2026-09-06)</title>
+  <style>
+    :root {
+      --bg: #0f141c;
+      --card-bg: #18202c;
+      --card-border: #263344;
+      --text: #e2e8f0;
+      --text-muted: #8b9bb4;
+      --primary: #38bdf8;
+      --accent: #818cf8;
+      --completed: #34d399;
+      --planned: #38bdf8;
+      --pending: #fbbf24;
+      --grid-line: #1f2937;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 2rem;
+      min-height: 100vh;
+    }
+
+    header {
+      max-width: 1200px;
+      margin: 0 auto 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .legend {
+      display: flex;
+      gap: 1.25rem;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .dot.completed { background: var(--completed); box-shadow: 0 0 8px rgba(52, 211, 153, 0.4); }
+    .dot.planned { background: var(--planned); box-shadow: 0 0 8px rgba(56, 189, 248, 0.4); }
+    .dot.pending { background: var(--pending); box-shadow: 0 0 8px rgba(251, 191, 36, 0.4); }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .gantt-header {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      border-bottom: 1px solid var(--card-border);
+      background: #131924;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .gantt-header-label {
+      padding: 1rem 1.25rem;
+      border-right: 1px solid var(--card-border);
+    }
+
+    .timeline-ticks {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      text-align: center;
+      padding: 1rem 0;
+    }
+
+    .tick {
+      border-right: 1px dashed var(--grid-line);
+      font-size: 0.75rem;
+    }
+    .tick:last-child {
+      border-right: none;
+    }
+
+    .gantt-row {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      border-bottom: 1px solid var(--card-border);
+      transition: background 0.15s ease;
+      align-items: center;
+    }
+
+    .gantt-row:hover {
+      background: #1b2432;
+    }
+
+    .task-info {
+      padding: 0.9rem 1.25rem;
+      border-right: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+
+    .task-name {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    .task-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .timeline-track {
+      position: relative;
+      height: 100%;
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      padding: 0 1rem;
+    }
+
+    .grid-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      pointer-events: none;
+    }
+
+    .grid-col {
+      border-right: 1px dashed var(--grid-line);
+    }
+    .grid-col:last-child {
+      border-right: none;
+    }
+
+    .bar {
+      position: relative;
+      z-index: 2;
+      height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding: 0 0.6rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+      color: #0b111a;
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }
+
+    .bar:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.15);
+      cursor: pointer;
+    }
+
+    .bar.completed {
+      background: linear-gradient(90deg, #10b981, #34d399);
+      color: #042f2e;
+    }
+
+    .bar.planned {
+      background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+      color: #082f49;
+    }
+
+    .bar.pending {
+      background: linear-gradient(90deg, #f59e0b, #fbbf24);
+      color: #451a03;
+    }
+
+    footer {
+      max-width: 1200px;
+      margin: 2rem auto 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: right;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Spritemotion Roadmap & Gantt</h1>
+      <div class="subtitle">Snapshot generated on 2026-09-06 — Strictly Additive Tracking</div>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="dot completed"></span> Completed</div>
+      <div class="legend-item"><span class="dot planned"></span> Planned (In Progress)</div>
+      <div class="legend-item"><span class="dot pending"></span> Pending / Backlog</div>
+    </div>
+  </header>
+
+  <div class="container">
+    <div class="gantt-header">
+      <div class="gantt-header-label">Module / Milestone</div>
+      <div class="timeline-ticks">
+        <div class="tick">Phase 1 (Sep 6)</div>
+        <div class="tick">Phase 2</div>
+        <div class="tick">Phase 3</div>
+        <div class="tick">Phase 4</div>
+        <div class="tick">Phase 5</div>
+        <div class="tick">Phase 6</div>
+        <div class="tick">Phase 7</div>
+        <div class="tick">Phase 8</div>
+      </div>
+    </div>
+
+    <!-- Row 1: Core Data Models -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">1. Core Data Models & Serde</span>
+        <span class="task-meta">src/model.rs • Project, Layer, Tracks</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar completed" style="left: 0%; width: 15%;">✓ 100% Done</div>
+      </div>
+    </div>
+
+    <!-- Row 2: 2D Math & Transforms -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">2. 2D Affine Math Engine</span>
+        <span class="task-meta">src/math.rs • Affine2D, Pivot TRS</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar completed" style="left: 0%; width: 16%;">✓ 100% Done</div>
+      </div>
+    </div>
+
+    <!-- Row 3: Evaluation Engine -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">3. Hierarchical Evaluation & Curves</span>
+        <span class="task-meta">src/eval.rs • Parent-child, Step & Lerp</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar completed" style="left: 4%; width: 18%;">✓ 100% Done</div>
+      </div>
+    </div>
+
+    <!-- Row 4: WASM Bindings -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">4. WebAssembly Interface</span>
+        <span class="task-meta">src/wasm.rs • wasm-bindgen, Node & Web</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar completed" style="left: 10%; width: 18%;">✓ 100% Done</div>
+      </div>
+    </div>
+
+    <!-- Row 5: Web UI Shell & jq79 -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">5. Web App Shell with jq79</span>
+        <span class="task-meta">UI Layout, Reactive State, Toolbar</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar planned" style="left: 25%; width: 22%;">Planned (Up Next)</div>
+      </div>
+    </div>
+
+    <!-- Row 6: Interactive Canvas & Gizmo -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">6. Canvas Viewport & Transform Gizmo</span>
+        <span class="task-meta">Pan/Zoom, Pivot, Translation, Rotation</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar planned" style="left: 35%; width: 25%;">Planned</div>
+      </div>
+    </div>
+
+    <!-- Row 7: Timeline & Curves Editor -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">7. Timeline & Keyframe Tracks</span>
+        <span class="task-meta">Draggable Keyframes, Easing Curve Selector</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar planned" style="left: 45%; width: 25%;">Planned</div>
+      </div>
+    </div>
+
+    <!-- Row 8: Spritesheet Rasterizer -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">8. Spritesheet Rasterizer & Exporter</span>
+        <span class="task-meta">Offline frame rasterization into PNG sheet</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar pending" style="left: 65%; width: 20%;">Pending Backlog</div>
+      </div>
+    </div>
+
+    <!-- Row 9: Runtime Player Library -->
+    <div class="gantt-row">
+      <div class="task-info">
+        <span class="task-name">9. Standalone Engine Player</span>
+        <span class="task-meta">Lightweight runtime for Godot / Bevy / Web</span>
+      </div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar pending" style="left: 75%; width: 22%;">Pending Backlog</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Immutable roadmap snapshot • Part of the Spritemotion open development history
+  </footer>
+</body>
+</html>
