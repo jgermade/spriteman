@@ -1,6 +1,6 @@
 {
   "name": "spritemotion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "2D animated sprite editor core with hierarchical layers, keyframe interpolation, and WASM bindings.",
   "type": "module",
   "scripts": {

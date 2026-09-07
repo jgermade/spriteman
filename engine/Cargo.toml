@@ -1,6 +1,6 @@
 [package]
 name = "spritemotion"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Jesús Germade <jesus@germade.es>"]
 description = "2D animated sprite editor core with hierarchical layers, keyframe interpolation, and WASM bindings."
