@@ -26,6 +26,40 @@ pub struct ResolvedFrame {
     pub items: Vec<RenderItem>,
 }
 
+/// Number of `f32` values written per render item by [`fill_frame_buffer`].
+pub const FRAME_ITEM_STRIDE: usize = 10;
+
+/// Packs a resolved frame into a flat `f32` buffer for consumers that read numbers
+/// directly instead of deserializing a document — the WASM boundary, primarily.
+///
+/// One record per item, ordered as the items are (ascending `z_index`):
+/// `[layer_index, a, b, c, d, tx, ty, opacity, pivot_world_x, pivot_world_y]`.
+///
+/// `layer_index` refers to `layer_ids`; an item whose layer is not in that list is
+/// written with `-1.0` so the consumer can skip it rather than mis-index.
+pub fn fill_frame_buffer(resolved: &ResolvedFrame, layer_ids: &[String], out: &mut Vec<f32>) -> usize {
+    let index_of: HashMap<&str, usize> = layer_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    out.clear();
+    out.reserve(resolved.items.len() * FRAME_ITEM_STRIDE);
+    for item in &resolved.items {
+        let index = index_of
+            .get(item.layer_id.as_str())
+            .map(|i| *i as f32)
+            .unwrap_or(-1.0);
+        out.push(index);
+        out.extend_from_slice(&item.matrix);
+        out.push(item.opacity);
+        out.push(item.pivot_world.x);
+        out.push(item.pivot_world.y);
+    }
+    resolved.items.len()
+}
+
 /// Evaluates a 1D scalar track (e.g. rotation, opacity) at frame `t`.
 pub fn sample_scalar_track(tracks: &[Keyframe<f32>], t: f32, default_val: f32) -> f32 {
     if tracks.is_empty() {

@@ -18,7 +18,6 @@ import {
   drawPivotGizmo,
   drawPixelCursor,
   drawPixelGrid,
-  CanvasRenderItem,
   PixelMap,
 } from '../helpers/canvas.helper';
 
@@ -81,10 +80,6 @@ class CanvasService {
   /** The moving-layer highlight is only resolved when it is about to be drawn. */
   private activeStamp: string = '';
   private activeProvider: (() => PixelMap | null) | null = null;
-
-  private lastItems: CanvasRenderItem[] = [];
-  private lastSelectedId: string | null = null;
-  private lastOnionItems: CanvasRenderItem[] | null = null;
 
   private listeners: Set<CanvasChangeListener> = new Set();
   private zoomListeners: Set<(zoom: number) => void> = new Set();
@@ -370,25 +365,6 @@ class CanvasService {
       return { x: pixelX, y: pixelY };
     }
     return null;
-  }
-
-  /**
-   * Records the resolved render items for the current frame. They drive the inspector,
-   * not the raster canvas — no transform gizmos are drawn today — so this never
-   * schedules a repaint on its own.
-   */
-  public render(
-    items: CanvasRenderItem[],
-    selectedId?: string | null,
-    onionItems?: CanvasRenderItem[] | null
-  ): void {
-    this.lastItems = items;
-    this.lastSelectedId = selectedId ?? null;
-    this.lastOnionItems = onionItems ?? null;
-  }
-
-  public getRenderItems(): { items: CanvasRenderItem[]; selectedId: string | null; onionItems: CanvasRenderItem[] | null } {
-    return { items: this.lastItems, selectedId: this.lastSelectedId, onionItems: this.lastOnionItems };
   }
 
   private refreshBuffers(): void {

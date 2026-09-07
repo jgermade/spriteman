@@ -16,6 +16,7 @@
     "jq79": "^0.7.2"
   },
   "devDependencies": {
+    "@types/node": "^26.4.1",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^6.2.0",

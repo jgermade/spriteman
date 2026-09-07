@@ -1,0 +1,145 @@
+# Mensajes de la interfaz de Spritemotion — Español.
+#
+# Las claves se agrupan por panel. Los marcadores se escriben como {nombre} y se
+# sustituyen al renderizar; consérvalos tal cual al traducir.
+
+app:
+  name: Spritemotion
+  title: "Spritemotion — Editor de sprites animados"
+  size_badge: "{width} × {height} px"
+  fps_badge: "{fps} FPS"
+  export: "⭳ Exportar"
+  export_title: Descargar este proyecto como fichero JSON
+  save: "💾 Guardar"
+  saving: "… Guardando"
+  saved: "✓ Guardado"
+  save_failed: "⚠ Sin guardar"
+  save_title: Guardar el proyecto en el almacenamiento del navegador
+  install: "⬇ Instalar app"
+
+canvas:
+  reset: Centrar vista
+  reset_title: Recentrar la vista (doble clic)
+  hint: "Mayús: mover capa • Ctrl: mover píxel • Espacio: desplazar • Ctrl+Rueda: zoom"
+
+timeline:
+  play: "▶ Reproducir"
+  pause: "⏸ Pausa"
+  play_title: Reproducir / Pausar
+  prev_title: Fotograma anterior
+  next_title: Fotograma siguiente
+  undo_title: "Deshacer (Cmd+Z / Ctrl+Z)"
+  redo_title: "Rehacer (Cmd+Mayús+Z / Ctrl+Mayús+Z)"
+  duplicate_title: Duplicar el fotograma actual
+  delete_title: Eliminar el fotograma actual
+  onion_title: Papel cebolla
+  group_title: "Agrupar los fotogramas seleccionados ({from}..{to}) con pivote e interpolación automática"
+  frame_indicator: "Fotograma: {current} / {total}"
+  new_animation: "+ Nueva animación"
+  new_animation_title: Crear una nueva secuencia de animación para este personaje
+  animation_tab_title: "{name} ({frames} fotogramas)"
+  animation_badge: "{frames}f"
+  rename_animation_prompt: "Renombrar animación:"
+  new_animation_prompt: "Nombre de la nueva animación (p. ej. walk, attack, jump):"
+  group_default_name: Grupo
+  group_pill_title: "{name} (fotogramas {from}..{to})"
+  group_pivot_title: Colocar el eje de giro (pivote) en el lienzo
+  ungroup_title: Desagrupar fotogramas
+  pivot_title: "Pivote: {coords}"
+  cell_title: "Fotograma {number} (Mayús+clic para seleccionar un rango, arrastra para reordenar)"
+  cell_in_group_title: "Fotograma {number} ({group})"
+  cell_in_group_pivot_title: "Fotograma {number} ({group} • Pivote: {coords})"
+  cell_intermediate_title: "Fotograma {number} (intermedio automático de {group}, no editable)"
+  add_frame_title: Clic para añadir un fotograma al final, o arrastra para insertarlo entre otros
+
+layers:
+  title: Jerarquía de capas
+  count: "{count} capas"
+  add: Añadir capa
+  add_title: Añadir una capa nueva
+  drag_title: Arrastra para reordenar capas o anidarlas como hijas
+  drag_handle_title: Arrastrar para reordenar
+  rename_title: Doble clic para renombrar
+  show_title: Mostrar capa
+  hide_title: Ocultar capa
+  move_up_title: "Subir la capa (aumentar z-index)"
+  move_down_title: "Bajar la capa (reducir z-index)"
+  delete_title: Borrar capa
+
+inspector:
+  title: Inspector de capa
+  empty: Ninguna capa seleccionada
+  title_for: "Inspector: {name}"
+  z_index: "Z: {value}"
+  opacity: "Opacidad:"
+  world_translation: "TX, TY en mundo:"
+  matrix: "Matriz de transformación:"
+
+palette:
+  title: Paleta
+  slot_primary_tag: I
+  slot_secondary_tag: D
+  slot_dual_tag: "I|D"
+  slot_primary_title: "Color izquierdo: clic en cualquier muestra"
+  slot_secondary_title: "Color derecho: clic derecho en cualquier muestra"
+  swap_title: "Intercambiar colores [X] (o mantener CMD/ALT)"
+  eraser_title: "Borrador — borra píxeles\n• Clic izquierdo: color izquierdo\n• Clic derecho: color derecho"
+
+settings:
+  title: Ajustes de sprite y velocidad
+  canvas_size: "Tamaño del lienzo (px):"
+  fps: "Velocidad de animación (FPS):"
+  zoom: "Zoom de píxel:"
+
+welcome:
+  tagline: "Editor de sprites animados en pixel art, con jerarquía de capas y motor WebAssembly"
+  create_title: "📄 Crear proyecto nuevo"
+  create_hint: Empieza con 1 fotograma
+  project_name: "Nombre del proyecto:"
+  project_name_placeholder: p. ej. hero_run
+  canvas_size: "Dimensiones del lienzo (px):"
+  fps: "Velocidad de animación (FPS):"
+  create_button: "✨ Crear proyecto (1 fotograma)"
+  open_title: "📁 Abrir proyecto guardado"
+  storage_badge: Almacenamiento del navegador
+  open: Abrir
+  no_projects: Aún no hay proyectos guardados
+
+modal:
+  new_tab: "📄 Proyecto nuevo"
+  open_tab: "📁 Abrir proyecto ({count})"
+  close_title: Cerrar
+  project_name: "Nombre del proyecto:"
+  project_name_placeholder: p. ej. hero_idle
+  canvas_size: "Tamaño del lienzo en píxeles:"
+  create_hint: Empieza con 1 fotograma y una capa base centrada.
+  fps: "Velocidad de animación (FPS):"
+  create_button: "✨ Crear proyecto"
+  storage_badge: Guardado en el navegador
+  open: Abrir
+  sample: "🌟 Abrir el proyecto de ejemplo"
+  import: "📥 Importar fichero JSON"
+
+tabs:
+  close_title: Cerrar pestaña
+  new_title: Crear o abrir un proyecto
+
+sizes:
+  16x16: "16 × 16 (Mini)"
+  24x24: "24 × 24 (Diminuto)"
+  32x32: "32 × 32 (Clásico)"
+  48x48: "48 × 48 (Medio)"
+  64x64: "64 × 64 (Estándar)"
+  128x128: "128 × 128 (Detallado)"
+
+fps:
+  6: 6 FPS (retro lento)
+  8: 8 FPS (caminar clásico)
+  12: 12 FPS (pixel art estándar)
+  16: 16 FPS (retro suave)
+  24: 24 FPS (cinematográfico)
+  30: 30 FPS (fluido)
+
+storage:
+  quota_exceeded: "No queda espacio para guardar «{name}». Exporta el proyecto a un fichero y libera espacio."
+  save_failed: No se ha podido guardar el proyecto.

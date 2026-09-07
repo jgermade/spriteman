@@ -3,8 +3,15 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client",
+      "node"
+    ],
     "strict": false,
     "noImplicitAny": false,
     "noUnusedLocals": true,
@@ -19,6 +26,13 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts"],
-  "exclude": ["src/wasm/pkg", "node_modules", "dist"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.d.ts"
+  ],
+  "exclude": [
+    "src/wasm/pkg",
+    "node_modules",
+    "dist"
+  ]
 }

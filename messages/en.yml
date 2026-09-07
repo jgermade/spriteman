@@ -1,0 +1,145 @@
+# Spritemotion UI messages — English (fallback locale).
+#
+# Keys are grouped by the panel they belong to. Placeholders are written as {name} and
+# are substituted at render time; keep them intact when translating.
+
+app:
+  name: Spritemotion
+  title: "Spritemotion — Pixel Art Sprite Animator"
+  size_badge: "{width} × {height} px"
+  fps_badge: "{fps} FPS"
+  export: "⭳ Export"
+  export_title: Download this project as a JSON file
+  save: "💾 Save"
+  saving: "… Saving"
+  saved: "✓ Saved"
+  save_failed: "⚠ Not saved"
+  save_title: Save project to browser storage
+  install: "⬇ Install App"
+
+canvas:
+  reset: Reset view
+  reset_title: Recenter view (double click)
+  hint: "Shift: move layer • Ctrl: move pixel • Space: pan • Ctrl+Wheel: zoom"
+
+timeline:
+  play: "▶ Play"
+  pause: "⏸ Pause"
+  play_title: Play / Pause
+  prev_title: Previous frame
+  next_title: Next frame
+  undo_title: "Undo (Cmd+Z / Ctrl+Z)"
+  redo_title: "Redo (Cmd+Shift+Z / Ctrl+Shift+Z)"
+  duplicate_title: Duplicate current frame
+  delete_title: Delete current frame
+  onion_title: Onion skinning
+  group_title: "Group selected frames ({from}..{to}) with a pivot and automatic in-betweens"
+  frame_indicator: "Frame: {current} / {total}"
+  new_animation: "+ New animation"
+  new_animation_title: Create a new animation sequence for this character
+  animation_tab_title: "{name} ({frames} frames)"
+  animation_badge: "{frames}f"
+  rename_animation_prompt: "Rename animation:"
+  new_animation_prompt: "Name for the new animation (e.g. walk, attack, jump):"
+  group_default_name: Group
+  group_pill_title: "{name} (frames {from}..{to})"
+  group_pivot_title: Place the rotation axis (pivot) on the canvas
+  ungroup_title: Ungroup frames
+  pivot_title: "Pivot: {coords}"
+  cell_title: "Frame {number} (Shift+Click to select a range, drag to reorder)"
+  cell_in_group_title: "Frame {number} ({group})"
+  cell_in_group_pivot_title: "Frame {number} ({group} • Pivot: {coords})"
+  cell_intermediate_title: "Frame {number} (auto in-between of {group}, not editable)"
+  add_frame_title: Click to append a frame, or drag to insert between existing frames
+
+layers:
+  title: Layer Hierarchy
+  count: "{count} Layers"
+  add: Add layer
+  add_title: Add new layer
+  drag_title: Drag to reorder layers or nest as a child
+  drag_handle_title: Drag to reorder
+  rename_title: Double click to rename
+  show_title: Show layer
+  hide_title: Hide layer
+  move_up_title: "Move layer up (raise z-index)"
+  move_down_title: "Move layer down (lower z-index)"
+  delete_title: Delete layer
+
+inspector:
+  title: Layer Inspector
+  empty: No layer selected
+  title_for: "Inspector: {name}"
+  z_index: "Z: {value}"
+  opacity: "Opacity:"
+  world_translation: "World TX, TY:"
+  matrix: "Transform Matrix:"
+
+palette:
+  title: Palette
+  slot_primary_tag: L
+  slot_secondary_tag: R
+  slot_dual_tag: "L|R"
+  slot_primary_title: "Left color: click any swatch"
+  slot_secondary_title: "Right color: right-click any swatch"
+  swap_title: "Swap colors [X] (or hold CMD/ALT)"
+  eraser_title: "Eraser — removes pixels\n• Left click: left color\n• Right click: right color"
+
+settings:
+  title: "Sprite & Speed Settings"
+  canvas_size: "Canvas Size (px):"
+  fps: "Animation Speed (FPS):"
+  zoom: "Pixel Zoom:"
+
+welcome:
+  tagline: "Pixel art animated sprite editor with skeletal hierarchy & WebAssembly engine"
+  create_title: "📄 Create New Project"
+  create_hint: Starts with 1 frame
+  project_name: "Project Name:"
+  project_name_placeholder: e.g. hero_run
+  canvas_size: "Canvas Dimensions (px):"
+  fps: "Animation Speed (FPS):"
+  create_button: "✨ Create Project (1 Frame)"
+  open_title: "📁 Open Saved Project"
+  storage_badge: Browser storage
+  open: Open
+  no_projects: No saved projects yet
+
+modal:
+  new_tab: "📄 New Project"
+  open_tab: "📁 Open Project ({count})"
+  close_title: Close
+  project_name: "Project Name:"
+  project_name_placeholder: e.g. hero_idle
+  canvas_size: "Pixel Canvas Size:"
+  create_hint: Starts with 1 initial frame and a centered base layer.
+  fps: "Animation Speed (FPS):"
+  create_button: "✨ Create Project"
+  storage_badge: Saved in browser storage
+  open: Open
+  sample: "🌟 Open Sample Walk Project"
+  import: "📥 Import JSON File"
+
+tabs:
+  close_title: Close tab
+  new_title: Create or open new project
+
+sizes:
+  16x16: "16 × 16 (Mini)"
+  24x24: "24 × 24 (Tiny)"
+  32x32: "32 × 32 (Classic)"
+  48x48: "48 × 48 (Medium)"
+  64x64: "64 × 64 (Standard)"
+  128x128: "128 × 128 (Detailed)"
+
+fps:
+  6: 6 FPS (Retro slow)
+  8: 8 FPS (Classic walk)
+  12: 12 FPS (Standard pixel art)
+  16: 16 FPS (Smooth retro)
+  24: 24 FPS (Cinematic)
+  30: 30 FPS (Fluid)
+
+storage:
+  quota_exceeded: "Not enough storage left to save \"{name}\". Export the project to a file and free up space."
+  save_failed: The project could not be saved.

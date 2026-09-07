@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   canvasService,
   onPaintStroke,
   onSetPivot,
@@ -498,8 +499,8 @@
   <div class="canvas-hud-overlay">
     <div class="hud-left">
       <span class="hud-zoom-badge">{{ Math.round(curZoom) }}x</span>
-      <button class="btn-hud-tool btn-reset-view" title="Recenter view (double click)">Reset view</button>
+      <button class="btn-hud-tool btn-reset-view" :title="t('canvas.reset_title')">{{ t('canvas.reset') }}</button>
     </div>
-    <div class="hud-hint">Shift: move layer • Ctrl: move pixel • Space: pan • Ctrl+Wheel: zoom</div>
+    <div class="hud-hint">{{ t('canvas.hint') }}</div>
   </div>
 </div>

@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   width,
   height,
   fps,
@@ -30,35 +31,35 @@
 
 <div class="settings-panel">
   <div class="panel-header">
-    <span class="panel-title">Sprite &amp; Speed Settings</span>
+    <span class="panel-title">{{ t('settings.title') }}</span>
   </div>
   <div class="settings-grid">
     <!-- Canvas Pixel Size -->
     <div class="setting-item">
-      <label class="setting-label">Canvas Size (px):</label>
+      <label class="setting-label">{{ t('settings.canvas_size') }}</label>
       <select class="setting-select size-select" :value="currentSizeValue" @change="handleSizeChange">
-        <option :each="p in standardSizes" :key="p.label" :value="`${p.width}x${p.height}`">{{ p.label }}</option>
+        <option :each="p in standardSizes" :key="p.labelKey" :value="`${p.width}x${p.height}`">{{ t(p.labelKey) }}</option>
       </select>
     </div>
 
     <!-- FPS Speed -->
     <div class="setting-item">
-      <label class="setting-label">Animation Speed (FPS):</label>
+      <label class="setting-label">{{ t('settings.fps') }}</label>
       <div class="fps-control-group">
         <select class="setting-select fps-select" :value="String(fps || 12)" @change="handleFpsChange">
-          <option value="6">6 FPS (Retro slow)</option>
-          <option value="8">8 FPS (Classic walk)</option>
-          <option value="12">12 FPS (Standard anime/game)</option>
-          <option value="16">16 FPS (Smooth retro)</option>
-          <option value="24">24 FPS (Cinematic)</option>
-          <option value="30">30 FPS (Fluid)</option>
+          <option value="6">{{ t('fps.6') }}</option>
+          <option value="8">{{ t('fps.8') }}</option>
+          <option value="12">{{ t('fps.12') }}</option>
+          <option value="16">{{ t('fps.16') }}</option>
+          <option value="24">{{ t('fps.24') }}</option>
+          <option value="30">{{ t('fps.30') }}</option>
         </select>
       </div>
     </div>
 
     <!-- Pixel Zoom -->
     <div class="setting-item">
-      <label class="setting-label">Pixel Zoom:</label>
+      <label class="setting-label">{{ t('settings.zoom') }}</label>
       <select class="setting-select zoom-select" :value="String(zoom || 6)" @change="handleZoomChange">
         <option value="2">2x</option>
         <option value="4">4x</option>

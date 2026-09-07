@@ -1,4 +1,4 @@
-<script :setup="{ tabs, activeTab, onSelectTab, onCloseTab, onNewTab }" type="text/typescript">
+<script :setup="{ t, tabs, activeTab, onSelectTab, onCloseTab, onNewTab }" type="text/typescript">
   const handleSelect = (tabId: string) => {
     onSelectTab?.(tabId);
   };
@@ -23,8 +23,8 @@
       @click="handleSelect(tabId)"
     >
       <span class="tab-title">📄 {{ tabId }}</span>
-      <button class="tab-close" title="Close tab" @click="handleClose($event, tabId)">✕</button>
+      <button class="tab-close" :title="t('tabs.close_title')" @click="handleClose($event, tabId)">✕</button>
     </div>
   </div>
-  <button class="btn-new-tab" title="Create or open new project" @click="handleNew">+</button>
+  <button class="btn-new-tab" :title="t('tabs.new_title')" @click="handleNew">+</button>
 </div>

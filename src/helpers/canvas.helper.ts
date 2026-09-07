@@ -7,13 +7,6 @@
  * an offscreen buffer at sprite resolution and blitted with a single `drawImage`.
  */
 
-export interface CanvasRenderItem {
-  layer_id: string;
-  matrix: [number, number, number, number, number, number];
-  opacity: number;
-  color?: string;
-}
-
 export type PixelMap = Record<string, string>;
 
 export function getTouchDistance(t1: { clientX: number; clientY: number }, t2: { clientX: number; clientY: number }): number {

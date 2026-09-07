@@ -6,7 +6,13 @@
  * changed — pixel edits leave the skeleton identical, so they cost nothing here.
  */
 import { $reactive, ReactiveDeepData } from 'jq79';
-import { ensureWasmInitialized, SpritemotionWasm, ResolvedFrame } from '../wasm/index';
+import {
+  ensureWasmInitialized,
+  readFrameBuffer,
+  EngineLayer,
+  ResolvedFrame,
+  SpritemotionWasm,
+} from '../wasm/index';
 
 export interface AnimationState {
   currentFrame: number;
@@ -31,6 +37,11 @@ class AnimationService {
   private loadedJson: string = '';
   /** Onion-skin frames are integer-indexed, so they can be cached per engine load. */
   private onionCache: Map<number, ResolvedFrame> = new Map();
+  /** Layer table the packed frame records index into; refreshed on each engine load. */
+  private engineLayers: EngineLayer[] = [];
+  private itemStride: number = 10;
+  /** Reused between ticks so steady-state playback allocates nothing. */
+  private frameData: Float32Array = new Float32Array(0);
 
   constructor() {
     this.state = $reactive<AnimationState>({
@@ -49,7 +60,7 @@ class AnimationService {
     await ensureWasmInitialized();
     this.engine = new SpritemotionWasm(projectJson);
     this.loadedJson = projectJson;
-    this.onionCache.clear();
+    this.refreshEngineLayers();
     this.state.totalFrames = this.engine.total_frames();
     this.state.fps = this.engine.fps();
     this.seek(0);
@@ -69,7 +80,7 @@ class AnimationService {
 
     this.engine.load_project(projectJson);
     this.loadedJson = projectJson;
-    this.onionCache.clear();
+    this.refreshEngineLayers();
     this.state.totalFrames = this.engine.total_frames();
     this.state.fps = this.engine.fps();
     this.seek(this.state.currentFrame);
@@ -78,6 +89,25 @@ class AnimationService {
   /** Drops cached evaluations without touching the engine document. */
   public invalidateFrames(): void {
     this.onionCache.clear();
+  }
+
+  /** Re-reads the layer table and stride that packed frame records refer to. */
+  private refreshEngineLayers(): void {
+    if (!this.engine) return;
+    this.onionCache.clear();
+    this.itemStride = this.engine.item_stride();
+    try {
+      this.engineLayers = JSON.parse(this.engine.layers_json());
+    } catch {
+      this.engineLayers = [];
+    }
+  }
+
+  /** Evaluates one frame into a packed buffer. `reuse` avoids a per-tick allocation. */
+  private evaluate(frame: number, reuse?: Float32Array): ResolvedFrame {
+    const count = this.engine!.evaluate_frame(frame);
+    const data = readFrameBuffer(this.engine!, count, this.itemStride, reuse);
+    return { frame, count, stride: this.itemStride, data, layers: this.engineLayers };
   }
 
   public getState(): AnimationState {
@@ -131,7 +161,9 @@ class AnimationService {
   private updateFrames(): void {
     if (!this.engine) return;
 
-    this.state.resolvedFrame = JSON.parse(this.engine.evaluate_frame_json(this.state.currentFrame));
+    const resolved = this.evaluate(this.state.currentFrame, this.frameData);
+    this.frameData = resolved.data;
+    this.state.resolvedFrame = resolved;
 
     if (!this.state.onionSkinEnabled || this.state.totalFrames <= 1) {
       if (this.state.onionSkinFrame !== null) this.state.onionSkinFrame = null;
@@ -141,7 +173,8 @@ class AnimationService {
     const prevInt = (Math.round(this.state.currentFrame) - 1 + this.state.totalFrames) % this.state.totalFrames;
     let cached = this.onionCache.get(prevInt);
     if (!cached) {
-      cached = JSON.parse(this.engine.evaluate_frame_json(prevInt)) as ResolvedFrame;
+      // Cached frames own their buffer; the reusable one belongs to the current frame.
+      cached = this.evaluate(prevInt);
       this.onionCache.set(prevInt, cached);
     }
     this.state.onionSkinFrame = cached;

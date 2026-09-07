@@ -8,6 +8,10 @@ export default defineConfig({
   server: {
     port: 3000,
     open: false,
+    fs: {
+      // The message catalogues live in /messages, outside the `src` root.
+      allow: ['..'],
+    },
   },
   build: {
     outDir: '../dist',

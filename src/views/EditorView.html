@@ -7,6 +7,11 @@
   const { storageService } = await import('../services/storage.service');
   const { tabsService } = await import('../services/tabs.service');
   const { canvasService } = await import('../services/canvas.service');
+  const { i18nService } = await import('../services/i18n.service');
+
+  // Messages must be in place before any child component renders.
+  await i18nService.init();
+  const t = i18nService.t;
 
   const CanvasStageComponent = _d(await import('../components/CanvasStage.html'));
   const FrameStripComponent = _d(await import('../components/FrameStrip.html'));
@@ -21,17 +26,18 @@
   const { STANDARD_PIXEL_SIZES, PIXEL_ART_PALETTE } = await import('../helpers/palette.helper');
   const { formatMatrix } = await import('../helpers/format.helper');
   const { $toRaw } = await import('jq79');
+  const { findRenderItem } = await import('../wasm/index');
 
   let hasActiveProject = false;
   let canvasWidth = 64;
   let canvasHeight = 64;
   let fps = 12;
   let isInstallable = pwaService.getState().isInstallable;
-  let saveButtonText = '💾 Save';
+  let saveButtonText = t('app.save');
 
-  $: sizeBadgeText = `${canvasWidth || 64} × ${canvasHeight || 64} px`;
-  $: fpsBadgeText = `${fps || 12} FPS`;
-  $: currentSaveText = saveButtonText || '💾 Save';
+  $: sizeBadgeText = t('app.size_badge', { width: canvasWidth || 64, height: canvasHeight || 64 });
+  $: fpsBadgeText = t('app.fps_badge', { fps: fps || 12 });
+  $: currentSaveText = saveButtonText || t('app.save');
 
   let canvasStage: any;
   let frameStrip: any;
@@ -111,7 +117,7 @@
     }
     if (revertAfter) {
       saveLabelTimer = window.setTimeout(() => {
-        saveButtonText = '💾 Save';
+        saveButtonText = t('app.save');
         saveLabelTimer = null;
       }, revertAfter);
     }
@@ -128,13 +134,17 @@
 
     try {
       await storageService.saveFile(activeProjectName, projectService.getRawJson());
-      setSaveLabel('✓ Saved', 1200);
+      setSaveLabel(t('app.saved'), 1200);
     } catch (err: any) {
       // A failed save used to disappear into an un-awaited promise; make it visible.
       savePending = true;
-      setSaveLabel('⚠ Not saved');
+      setSaveLabel(t('app.save_failed'));
       console.error('[storage] Failed to save project:', err);
-      window.alert(err?.message || 'The project could not be saved.');
+      const message =
+        err?.name === 'StorageQuotaError'
+          ? t('storage.quota_exceeded', { name: activeProjectName })
+          : t('storage.save_failed');
+      window.alert(message);
     }
   };
 
@@ -145,7 +155,7 @@
   const saveCurrentProject = (): void => {
     if (!activeProjectName) return;
     savePending = true;
-    setSaveLabel('… Saving');
+    setSaveLabel(t('app.saving'));
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = window.setTimeout(() => {
       saveTimer = null;
@@ -307,8 +317,9 @@
     }
 
     if (animState.resolvedFrame && inspectorPanel?.data) {
-      const selectedItem = animState.resolvedFrame.items.find((i: any) => i.layer_id === projState.selectedLayerId);
-      setField(inspectorPanel, 'item', selectedItem || null);
+      // Only the selected layer is materialized out of the packed frame buffer.
+      const selectedItem = findRenderItem(animState.resolvedFrame, projState.selectedLayerId);
+      inspectorPanel.data.item = selectedItem;
       setField(inspectorPanel, 'matrixText', selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '');
     }
   };
@@ -341,13 +352,6 @@
       syncPanels(proj, animState);
       syncCanvasContent(proj, animState);
       syncPivotState();
-      if (animState.resolvedFrame) {
-        canvasService.render(
-          animState.resolvedFrame.items,
-          proj.selectedLayerId,
-          animState.onionSkinFrame?.items ?? null
-        );
-      }
     });
 
     // 3. Project service updates
@@ -381,10 +385,6 @@
       syncPivotState();
       syncPanels(projState, anim);
       syncCanvasContent(projState, anim);
-
-      if (anim.resolvedFrame) {
-        canvasService.render(anim.resolvedFrame.items, projState.selectedLayerId, anim.onionSkinFrame?.items ?? null);
-      }
     });
 
     // 4. PWA state updates
@@ -498,6 +498,7 @@
 
   // Mount CanvasStage Component
   canvasStage = CanvasStageComponent.mount(root.querySelector('.canvas-stage-wrapper'), {
+    t,
     canvasService,
     onPaintStroke: (pixels: any, color: string) => {
       const currentInt = Math.round(animationService.getState().currentFrame);
@@ -588,6 +589,7 @@
 
   // Mount other child components
   projectTabs = ProjectTabsComponent.mount(root.querySelector('.tabs-wrapper'), {
+    t,
     tabs: [],
     activeTab: null,
     onSelectTab: (tabId: string) => tabsService.selectTab(tabId),
@@ -603,6 +605,7 @@
   });
 
   welcomeScreen = WelcomeScreenComponent.mount(root.querySelector('.welcome-screen-wrapper'), {
+    t,
     savedFiles: [],
     sizes: STANDARD_PIXEL_SIZES,
     onCreateProject: (name: string, w: number, h: number, fpsVal: number) => handleCreateProject(name, w, h, fpsVal),
@@ -612,6 +615,7 @@
   });
 
   hierarchyTree = HierarchyTreeComponent.mount(root.querySelector('.hierarchy-wrapper'), {
+    t,
     layers: [],
     selectedLayerId: null,
     isPivotMode: false,
@@ -666,6 +670,7 @@
   });
 
   frameStrip = FrameStripComponent.mount(root.querySelector('.framestrip-wrapper'), {
+    t,
     totalFrames: 1,
     currentFrame: 0,
     isPlaying: false,
@@ -758,7 +763,7 @@
       syncPivotState();
     },
     onAddAnimation: () => {
-      const name = prompt('Name for the new animation (e.g. walk, attack, jump):', 'walk');
+      const name = prompt(t('timeline.new_animation_prompt'), 'walk');
       if (name !== null) {
         projectService.addAnimation(name.trim() || undefined);
         animationService.reloadProject(projectService.getEngineJson());
@@ -783,11 +788,13 @@
   });
 
   inspectorPanel = InspectorPanelComponent.mount(root.querySelector('.inspector-wrapper'), {
+    t,
     item: null,
     matrixText: '',
   });
 
   pixelPalette = PixelPaletteComponent.mount(root.querySelector('.palette-wrapper'), {
+    t,
     primaryColor: '#000000',
     secondaryColor: '#ffffff',
     isTempSwapped: false,
@@ -817,6 +824,7 @@
   });
 
   animationSettings = AnimationSettingsComponent.mount(root.querySelector('.settings-wrapper'), {
+    t,
     width: 64,
     height: 64,
     fps: 12,
@@ -841,6 +849,7 @@
   });
 
   projectModal = ProjectModalComponent.mount(root.querySelector('.modal-wrapper'), {
+    t,
     isOpen: false,
     currentTab: 'new',
     savedFiles: [],
@@ -883,7 +892,7 @@
     <div class="topbar-left">
       <div class="app-logo">
         <img src="./icon-192.svg" class="logo-pixel-img" width="22" height="22" alt="Logo" />
-        <span class="logo-text">Spritemotion</span>
+        <span class="logo-text">{{ t('app.name') }}</span>
       </div>
 
       <!-- Project Tabs Strip -->
@@ -900,14 +909,14 @@
         :if="hasActiveProject"
         id="btn-menu-export"
         class="topbar-btn"
-        title="Download this project as a JSON file"
+        :title="t('app.export_title')"
         @click="exportCurrentProject()"
-      >⭳ Export</button>
+      >{{ t('app.export') }}</button>
       <button
         :if="hasActiveProject"
         id="btn-menu-save"
         class="topbar-btn primary"
-        title="Save project to browser storage"
+        :title="t('app.save_title')"
         @click="flushSave()"
       >{{ currentSaveText }}</button>
       <button
@@ -915,7 +924,7 @@
         id="pwa-install-btn"
         class="pwa-install-btn"
         @click="handleInstall()"
-      >⬇ Install App</button>
+      >{{ t('app.install') }}</button>
     </div>
   </div>
 
