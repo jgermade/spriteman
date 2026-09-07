@@ -168,14 +168,14 @@
         'drop-before': dropTargetId === layer.id && dropMode === 'before',
         'drop-after': dropTargetId === layer.id && dropMode === 'after',
         'drop-child': dropTargetId === layer.id && dropMode === 'child'
-      }" :draggable="renamingId !== layer.id" title="Arrastra para reordenar capas o anidar como hija"
+      }" :draggable="renamingId !== layer.id" title="Drag to reorder layers or nest as a child"
       @click="handleSelect(layer.id)" @dragstart="handleDragStart($event, layer)" @dragend="handleDragEnd()"
       @dragover="handleDragOver($event, layer)" @dragleave="handleDragLeave($event, layer)"
       @drop="handleDrop($event, layer)">
       <div class="layer-title-group">
         <button class="btn-layer-action btn-layer-visibility"
           :class="{ 'is-visible': layer.visible !== false, 'is-hidden': layer.visible === false }"
-          :title="layer.visible !== false ? 'Ocultar capa' : 'Mostrar capa'"
+          :title="layer.visible !== false ? 'Hide layer' : 'Show layer'"
           @click.stop="onToggleLayerVisibility?.(layer.id)">
           <svg :if="layer.visible !== false" width="13" height="13" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,7 +191,7 @@
           </svg>
         </button>
 
-        <span class="layer-drag-handle" title="Arrastrar para reordenar">⋮⋮</span>
+        <span class="layer-drag-handle" title="Drag to reorder">⋮⋮</span>
 
         <span class="layer-name-container">
           <span :if="!!layer.parent_id" class="layer-child-arrow">↳</span>
@@ -224,14 +224,14 @@
           </svg>
         </button>
 
-        <button class="btn-layer-action btn-layer-move-up" title="Mover capa arriba (subir z-index)"
+        <button class="btn-layer-action btn-layer-move-up" title="Move layer up (raise z-index)"
           @click.stop="onMoveLayerUp?.(layer.id)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="18 15 12 9 6 15"></polyline>
           </svg>
         </button>
 
-        <button class="btn-layer-action btn-layer-move-down" title="Mover capa abajo (bajar z-index)"
+        <button class="btn-layer-action btn-layer-move-down" title="Move layer down (lower z-index)"
           @click.stop="onMoveLayerDown?.(layer.id)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
@@ -239,7 +239,7 @@
         </button>
 
         <button class="btn-layer-action btn-layer-delete" :class="{ disabled: validLayers.length <= 1 }"
-          :style="validLayers.length <= 1 ? 'opacity: 0.3; cursor: not-allowed;' : ''" title="Borrar capa"
+          :style="validLayers.length <= 1 ? 'opacity: 0.3; cursor: not-allowed;' : ''" title="Delete layer"
           @click.stop="handleDelete(layer.id)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -253,7 +253,7 @@
     </div>
 
     <!-- Add Layer placeholder at bottom -->
-    <button class="layer-item new" title="Añadir nueva capa" @click="onAddLayer?.()">
+    <button class="layer-item new" title="Add new layer" @click="onAddLayer?.()">
       <span class="layer-new-icon">+</span>
       <span class="layer-new-text">Añadir Capa</span>
     </button>

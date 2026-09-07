@@ -1,15 +1,6 @@
 /**
- * Pure formatting helpers for UI display, times, and matrices.
+ * Pure formatting helpers for UI display.
  */
-
-export function formatFrame(frame: number, totalFrames: number): string {
-  return `${frame.toFixed(1)} / ${totalFrames}`;
-}
-
-export function formatTime(frame: number, fps: number): string {
-  const seconds = frame / Math.max(fps, 1);
-  return `${seconds.toFixed(2)}s`;
-}
 
 export function formatMatrix(matrix: [number, number, number, number, number, number]): string {
   const [a, b, c, d, tx, ty] = matrix;

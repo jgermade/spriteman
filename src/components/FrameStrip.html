@@ -6,6 +6,7 @@
   spriteWidth,
   spriteHeight,
   framePixels,
+  frameRevisions,
   animations,
   activeAnimationId,
   layerGroups,
@@ -42,11 +43,18 @@
   let thumbCanvas: HTMLCanvasElement | null = null;
   const thumbCache = new Map<string, string>();
 
-  const getThumbnail = (i: number, pixelsMap: any, w: number, h: number): string => {
+  /**
+   * Thumbnails are cached by the frame's content revision, which the project service
+   * bumps whenever that frame changes. The previous key (pixel count + first color)
+   * missed edits that repainted a pixel without changing the count.
+   */
+  const getThumbnail = (i: number, pixelsMap: any, w: number, h: number, revision: number): string => {
+    const key = `${i}_${w || 64}x${h || 64}_r${revision}`;
+    const cached = thumbCache.get(key);
+    if (cached !== undefined) return cached;
+
     const pixels = (pixelsMap && pixelsMap[i]) || {};
     const keys = Object.keys(pixels);
-    const key = `${i}_${w || 64}x${h || 64}_${keys.length}_${keys[0] ? pixels[keys[0]] : ''}`;
-    if (thumbCache.has(key)) return thumbCache.get(key)!;
 
     if (!thumbCanvas) {
       thumbCanvas = document.createElement('canvas');
@@ -76,7 +84,8 @@
     }
 
     const dataUrl = thumbCanvas.toDataURL();
-    if (thumbCache.size > 250) thumbCache.clear();
+    // Keep the cache bounded; stale revisions are never looked up again.
+    if (thumbCache.size > 512) thumbCache.clear();
     thumbCache.set(key, dataUrl);
     return dataUrl;
   };
@@ -105,7 +114,7 @@
   };
 
   const handleRenameAnim = (a: any) => {
-    const newName = prompt('Renombrar animación:', a.name || '');
+    const newName = prompt('Rename animation:', a.name || '');
     if (newName && newName.trim() && a.id) {
       onRenameAnimation?.(a.id, newName.trim());
     }
@@ -126,7 +135,6 @@
 
   // Build reactive reel items
   const buildCellData = (i: number, cellGroup: any, isIntermediate: boolean) => {
-    const isActive = i === activeInt;
     const isInRange = hasRangeSelection && i >= rangeStart && i <= rangeEnd;
     const inGroup = !!cellGroup;
     const isGroupStart = inGroup && i === cellGroup.start_frame;
@@ -136,7 +144,6 @@
 
     return {
       index: i,
-      isActive,
       isInRange,
       inGroup,
       isGroupStart,
@@ -144,11 +151,11 @@
       isIntermediate,
       hasGroupPivot,
       pivotCoords,
-      thumb: getThumbnail(i, framePixels, spriteWidth, spriteHeight),
+      thumb: getThumbnail(i, framePixels, spriteWidth, spriteHeight, (frameRevisions || [])[i] || 0),
       title: isIntermediate
-        ? `Fotograma ${i + 1} (Intermedio automático de ${cellGroup?.name || 'Grupo'}, no editable)`
+        ? `Frame ${i + 1} (auto in-between of ${cellGroup?.name || 'Group'}, not editable)`
         : inGroup
-        ? `Frame ${i + 1} (${cellGroup?.name || 'Grupo'}${hasGroupPivot ? ` • Pivote: ${pivotCoords}` : ''})`
+        ? `Frame ${i + 1} (${cellGroup?.name || 'Group'}${hasGroupPivot ? ` • Pivot: ${pivotCoords}` : ''})`
         : `Frame ${i + 1} (Shift+Click to select range, Drag to reorder)`
     };
   };
@@ -303,9 +310,9 @@
     </div>
     <button
       class="btn-anim-tab-new"
-      title="Crear nueva secuencia de animación para este personaje"
+      title="Create a new animation sequence for this character"
       @click="onAddAnimation?.()"
-    >+ Nueva Animación</button>
+    >+ New animation</button>
   </div>
 
   <!-- Timeline Controls Toolbar -->
@@ -329,7 +336,7 @@
         class="btn-tool icon-only btn-undo"
         :class="{ disabled: !canUndo }"
         :disabled="!canUndo"
-        title="Deshacer (Cmd+Z / Ctrl+Z)"
+        title="Undo (Cmd+Z / Ctrl+Z)"
         @click="onUndo?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -341,7 +348,7 @@
         class="btn-tool icon-only btn-redo"
         :class="{ disabled: !canRedo }"
         :disabled="!canRedo"
-        title="Rehacer (Cmd+Shift+Z / Ctrl+Shift+Z)"
+        title="Redo (Cmd+Shift+Z / Ctrl+Shift+Z)"
         @click="onRedo?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -354,7 +361,7 @@
     <div class="frame-actions-group">
       <button
         class="btn-tool icon-only btn-duplicate"
-        title="Duplicar fotograma actual"
+        title="Duplicate current frame"
         @click="onDuplicateFrame?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -366,7 +373,7 @@
         class="btn-tool icon-only btn-delete"
         :class="{ disabled: (totalFrames || 1) <= 1 }"
         :disabled="(totalFrames || 1) <= 1"
-        title="Eliminar fotograma actual"
+        title="Delete current frame"
         @click="onDeleteFrame?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -379,7 +386,7 @@
       <button
         class="btn-tool icon-only btn-onion"
         :class="{ active: onionSkin }"
-        title="Papel cebolla (Onion Skinning)"
+        title="Onion skinning"
         @click="handleToggleOnion()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -391,7 +398,7 @@
       <button
         :if="hasRangeSelection"
         class="btn-tool icon-only btn-group-selection primary"
-        :title="`Agrupar fotogramas seleccionados (${rangeStart + 1}..${rangeEnd + 1}) con pivote e interpolación automática`"
+        :title="`Group selected frames (${rangeStart + 1}..${rangeEnd + 1}) with a pivot and automatic in-betweens`"
         @click="handleGroupSelection()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -423,14 +430,14 @@
           :class="{ active: item.isGroupActive }"
           @click="onSelectFrame?.(item.group.start_frame)"
         >
-          <span class="group-pill-name" :title="`${item.group.name || 'Grupo'} (Fotogramas ${item.group.start_frame + 1}..${item.group.end_frame + 1})`">
-            ⚡ {{ item.group.name || 'Grupo' }}
+          <span class="group-pill-name" :title="`${item.group.name || 'Group'} (frames ${item.group.start_frame + 1}..${item.group.end_frame + 1})`">
+            ⚡ {{ item.group.name || 'Group' }}
           </span>
           <div class="group-pill-actions">
             <button
               class="btn-group-action btn-group-pivot"
               :class="{ active: isPivotMode && item.isGroupActive }"
-              title="Ubicar eje de giro (pivote) en el canvas"
+              title="Place the rotation axis (pivot) on the canvas"
               @click.stop="onToggleGroupPivotMode?.()"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -443,7 +450,7 @@
             </button>
             <button
               class="btn-group-action btn-group-ungroup"
-              title="Desagrupar fotogramas"
+              title="Ungroup frames"
               @click.stop="onUngroupFrames?.(item.group.id)"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -459,7 +466,7 @@
             :each="c in item.cells"
             :key="c.index"
             class="frame-cell in-group group-intermediate"
-            :class="{ active: c.isActive, 'in-range-selected': c.isInRange }"
+            :class="{ active: c.index === activeInt, 'in-range-selected': c.isInRange }"
             :title="c.title"
             @click="handleCellClick($event, c.index, true)"
           >
@@ -475,7 +482,7 @@
         :else
         class="frame-cell"
         :class="{
-          active: item.cell.isActive,
+          active: item.cell.index === activeInt,
           'in-range-selected': item.cell.isInRange,
           'in-group': item.cell.inGroup,
           'group-start': item.cell.isGroupStart,
@@ -490,7 +497,7 @@
         @dragover="handleCellDragOver($event, item.cell.index)"
       >
         <span class="cell-num">{{ item.cell.index + 1 }}</span>
-        <span :if="item.cell.hasGroupPivot" class="cell-pivot-dot" :title="`Pivote: ${item.cell.pivotCoords}`">📍</span>
+        <span :if="item.cell.hasGroupPivot" class="cell-pivot-dot" :title="`Pivot: ${item.cell.pivotCoords}`">📍</span>
         <img class="cell-thumb-canvas" :src="item.cell.thumb" width="44" height="44" alt="Thumb" />
       </button>
     </div>

@@ -92,7 +92,7 @@
       font-weight: 500;
       cursor: pointer;
       border-radius: 5px;
-      transition: all 0.15s ease;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
       margin-top: 0.45rem;
     }
 
@@ -172,7 +172,7 @@
       justify-content: center;
       cursor: pointer;
       padding: 0;
-      transition: all 0.12s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
       flex-shrink: 0;
     }
 
@@ -224,7 +224,7 @@
       padding: 0.12rem 0.35rem;
       border-radius: 3px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
       font-family: inherit;
     }
 
@@ -249,7 +249,7 @@
       padding: 0.12rem 0.35rem;
       border-radius: 3px;
       cursor: pointer;
-      transition: all 0.12s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
     }
 
     .btn-pivot-toggle:hover {

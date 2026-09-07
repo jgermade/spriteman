@@ -1,5 +1,10 @@
 /**
- * Pure canvas drawing helpers for pixel art rendering, checkerboard, onion skinning, and gizmos.
+ * Pure canvas drawing helpers for pixel art rendering, offscreen sprite buffers and gizmos.
+ *
+ * Everything here draws in *screen space*: the caller keeps the 2D context untransformed
+ * (except for the device-pixel-ratio scale) and passes the artboard origin plus the zoom
+ * factor. Sprite content itself is never drawn pixel by pixel — it is composed once into
+ * an offscreen buffer at sprite resolution and blitted with a single `drawImage`.
  */
 
 export interface CanvasRenderItem {
@@ -8,6 +13,8 @@ export interface CanvasRenderItem {
   opacity: number;
   color?: string;
 }
+
+export type PixelMap = Record<string, string>;
 
 export function getTouchDistance(t1: { clientX: number; clientY: number }, t2: { clientX: number; clientY: number }): number {
   const dx = t1.clientX - t2.clientX;
@@ -53,210 +60,258 @@ export function getLinePixels(x0: number, y0: number, x1: number, y1: number): A
 }
 
 /**
- * Draws discrete 1x1 sprite pixels from a coordinate map (e.g. "x,y" => "#color").
+ * Parses a `#rgb`, `#rrggbb` or `#rrggbbaa` color into RGBA components.
+ * Returns null for anything else so callers can fall back to the slow path.
  */
-export function drawPixels(
-  ctx: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
-  pixels: Record<string, string>,
-  alphaOverride?: number,
-  tintColor?: string
-): void {
-  ctx.save();
-  if (typeof alphaOverride === 'number') {
-    ctx.globalAlpha = alphaOverride;
+export function parseHexColor(color: string): [number, number, number, number] | null {
+  if (typeof color !== 'string' || color.charCodeAt(0) !== 35 /* # */) return null;
+  const hex = color.slice(1);
+  if (hex.length === 3) {
+    const r = parseInt(hex[0] + hex[0], 16);
+    const g = parseInt(hex[1] + hex[1], 16);
+    const b = parseInt(hex[2] + hex[2], 16);
+    return Number.isNaN(r + g + b) ? null : [r, g, b, 255];
   }
-  for (const key of Object.keys(pixels)) {
-    const comma = key.indexOf(',');
-    if (comma === -1) continue;
-    const x = parseInt(key.slice(0, comma), 10);
-    const y = parseInt(key.slice(comma + 1), 10);
-    ctx.fillStyle = tintColor || pixels[key];
-    ctx.fillRect(startX + x, startY + y, 1, 1);
+  if (hex.length === 6 || hex.length === 8) {
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) : 255;
+    return Number.isNaN(r + g + b + a) ? null : [r, g, b, a];
   }
-  ctx.restore();
+  return null;
 }
 
 /**
- * Draws a 1x1 pixel hover highlight showing the target cell and active color with dual outline.
+ * Splits a `"x,y"` pixel key. Returns null when the key is malformed.
  */
-export function drawPixelCursor(
-  ctx: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
-  px: number,
-  py: number,
-  color: string,
-  zoom: number
-): void {
-  ctx.save();
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.55;
-  ctx.fillRect(startX + px, startY + py, 1, 1);
-  ctx.globalAlpha = 1.0;
-  // Dual-stroke border: visible on both white and dark pixels
-  ctx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
-  ctx.lineWidth = 1.5 / zoom;
-  ctx.strokeRect(startX + px, startY + py, 1, 1);
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 0.75 / zoom;
-  ctx.strokeRect(startX + px, startY + py, 1, 1);
-  ctx.restore();
+export function parsePixelKey(key: string): { x: number; y: number } | null {
+  const comma = key.indexOf(',');
+  if (comma === -1) return null;
+  const x = parseInt(key.slice(0, comma), 10);
+  const y = parseInt(key.slice(comma + 1), 10);
+  if (Number.isNaN(x) || Number.isNaN(y)) return null;
+  return { x, y };
 }
 
 /**
- * Draws a pixel art transparency checkerboard strictly aligned with the sprite pixel resolution.
- * In local sprite coordinates, each checker square is exactly 1x1 sprite pixel.
+ * Composes a pixel map into an offscreen canvas at sprite resolution via a single
+ * `putImageData`. `tint` forces every pixel to one color (used for onion skin and for
+ * the moving-layer highlight); `alpha` scales the whole buffer.
+ *
+ * This replaces one `fillRect` per painted pixel on every repaint with one blit.
  */
-export function drawPixelCheckerboard(
-  ctx: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
+export function composePixelBuffer(
+  target: HTMLCanvasElement,
   spriteWidth: number,
   spriteHeight: number,
-  c1: string = '#111823',
-  c2: string = '#192332'
+  pixels: PixelMap | null,
+  tint?: string,
+  alpha: number = 1
 ): void {
-  ctx.save();
-  for (let y = 0; y < spriteHeight; y++) {
-    for (let x = 0; x < spriteWidth; x++) {
-      const isEven = (x + y) % 2 === 0;
-      ctx.fillStyle = isEven ? c1 : c2;
-      ctx.fillRect(startX + x, startY + y, 1, 1);
+  const w = Math.max(1, spriteWidth);
+  const h = Math.max(1, spriteHeight);
+  if (target.width !== w) target.width = w;
+  if (target.height !== h) target.height = h;
+
+  const ctx = target.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, w, h);
+  if (!pixels) return;
+
+  const keys = Object.keys(pixels);
+  if (keys.length === 0) return;
+
+  const image = ctx.createImageData(w, h);
+  const data = image.data;
+  const tintRgba = tint ? parseHexColor(tint) : null;
+  const globalAlpha = Math.round(Math.max(0, Math.min(1, alpha)) * 255);
+  const fallback: Array<{ x: number; y: number; color: string }> = [];
+
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const point = parsePixelKey(key);
+    if (!point || point.x < 0 || point.y < 0 || point.x >= w || point.y >= h) continue;
+
+    const rgba = tintRgba || parseHexColor(pixels[key]);
+    if (!rgba) {
+      fallback.push({ x: point.x, y: point.y, color: pixels[key] });
+      continue;
     }
+
+    const offset = (point.y * w + point.x) * 4;
+    data[offset] = rgba[0];
+    data[offset + 1] = rgba[1];
+    data[offset + 2] = rgba[2];
+    data[offset + 3] = (rgba[3] * globalAlpha) / 255;
   }
+
+  ctx.putImageData(image, 0, 0);
+
+  // Non-hex colors (named colors, rgba() strings) are rare; draw them the slow way.
+  if (fallback.length > 0) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    for (const px of fallback) {
+      ctx.fillStyle = tint || px.color;
+      ctx.fillRect(px.x, px.y, 1, 1);
+    }
+    ctx.restore();
+  }
+}
+
+/**
+ * Builds the perimeter outline of a pixel cluster, in sprite units, as flat
+ * `[x1, y1, x2, y2, …]` segments. Computed once per cluster change instead of per repaint.
+ */
+export function buildClusterOutline(pixels: PixelMap | null): Float32Array {
+  if (!pixels) return new Float32Array(0);
+  const keys = Object.keys(pixels);
+  if (keys.length === 0) return new Float32Array(0);
+
+  const occupied = new Set<number>();
+  const points: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < keys.length; i++) {
+    const point = parsePixelKey(keys[i]);
+    if (!point) continue;
+    occupied.add((point.x & 0xffff) | ((point.y & 0xffff) << 16));
+    points.push(point);
+  }
+
+  const segments: number[] = [];
+  for (let i = 0; i < points.length; i++) {
+    const { x, y } = points[i];
+    if (!occupied.has((x & 0xffff) | (((y - 1) & 0xffff) << 16))) segments.push(x, y, x + 1, y);
+    if (!occupied.has((x & 0xffff) | (((y + 1) & 0xffff) << 16))) segments.push(x, y + 1, x + 1, y + 1);
+    if (!occupied.has(((x - 1) & 0xffff) | ((y & 0xffff) << 16))) segments.push(x, y, x, y + 1);
+    if (!occupied.has(((x + 1) & 0xffff) | ((y & 0xffff) << 16))) segments.push(x + 1, y, x + 1, y + 1);
+  }
+  return new Float32Array(segments);
+}
+
+/**
+ * Strokes a precomputed cluster outline, mapping sprite units to screen space.
+ */
+export function drawClusterOutline(
+  ctx: CanvasRenderingContext2D,
+  segments: Float32Array,
+  originX: number,
+  originY: number,
+  zoom: number,
+  color: string,
+  lineWidth: number
+): void {
+  if (segments.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (let i = 0; i < segments.length; i += 4) {
+    ctx.moveTo(originX + segments[i] * zoom, originY + segments[i + 1] * zoom);
+    ctx.lineTo(originX + segments[i + 2] * zoom, originY + segments[i + 3] * zoom);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
 /**
- * Draws pixel grid lines for precision alignment strictly matching sprite pixel resolution.
+ * Draws the pixel grid over the artboard. One stroked path for the whole grid.
  */
 export function drawPixelGrid(
   ctx: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
+  originX: number,
+  originY: number,
   spriteWidth: number,
   spriteHeight: number,
-  lineWidth: number = 0.08,
-  lineColor: string = 'rgba(255, 255, 255, 0.08)'
+  zoom: number,
+  lineColor: string,
+  lineWidth: number = 1
 ): void {
   ctx.save();
   ctx.strokeStyle = lineColor;
   ctx.lineWidth = lineWidth;
   ctx.beginPath();
+  const right = originX + spriteWidth * zoom;
+  const bottom = originY + spriteHeight * zoom;
   for (let x = 0; x <= spriteWidth; x++) {
-    ctx.moveTo(startX + x, startY);
-    ctx.lineTo(startX + x, startY + spriteHeight);
+    const sx = Math.round(originX + x * zoom) + 0.5;
+    ctx.moveTo(sx, originY);
+    ctx.lineTo(sx, bottom);
   }
   for (let y = 0; y <= spriteHeight; y++) {
-    ctx.moveTo(startX, startY + y);
-    ctx.lineTo(startX + spriteWidth, startY + y);
+    const sy = Math.round(originY + y * zoom) + 0.5;
+    ctx.moveTo(originX, sy);
+    ctx.lineTo(right, sy);
   }
   ctx.stroke();
   ctx.restore();
 }
 
 /**
- * Draws the rotation axis / pivot point gizmo for a layer.
+ * Draws the 1x1 pixel hover highlight showing the target cell and the active color.
+ */
+export function drawPixelCursor(
+  ctx: CanvasRenderingContext2D,
+  originX: number,
+  originY: number,
+  px: number,
+  py: number,
+  zoom: number,
+  color: string
+): void {
+  const x = originX + px * zoom;
+  const y = originY + py * zoom;
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(x, y, zoom, zoom);
+  ctx.globalAlpha = 1;
+  // Dual stroke so the cursor reads on both light and dark pixels.
+  ctx.strokeStyle = 'rgba(15, 23, 42, 0.7)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, zoom, zoom);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, zoom, zoom);
+  ctx.restore();
+}
+
+/**
+ * Draws the rotation axis / pivot point gizmo for the active interpolation group.
  */
 export function drawPivotGizmo(
   ctx: CanvasRenderingContext2D,
-  startX: number,
-  startY: number,
+  originX: number,
+  originY: number,
   px: number,
   py: number,
   zoom: number,
   isEditing: boolean = false
 ): void {
-  ctx.save();
-  const centerX = startX + px;
-  const centerY = startY + py;
+  const centerX = originX + px * zoom;
+  const centerY = originY + py * zoom;
 
-  // Outer ring
+  ctx.save();
+
   ctx.beginPath();
-  ctx.arc(centerX, centerY, 5 / zoom, 0, Math.PI * 2);
+  ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
   ctx.strokeStyle = isEditing ? '#fbf236' : '#e43b44';
-  ctx.lineWidth = 1.5 / zoom;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // Center solid pivot dot
   ctx.beginPath();
-  ctx.arc(centerX, centerY, 2.5 / zoom, 0, Math.PI * 2);
+  ctx.arc(centerX, centerY, 2.5, 0, Math.PI * 2);
   ctx.fillStyle = '#e43b44';
   ctx.fill();
 
-  // Crosshairs
   ctx.strokeStyle = isEditing ? '#f59e0b' : 'rgba(15, 23, 42, 0.7)';
-  ctx.lineWidth = 1 / zoom;
+  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(centerX - 7 / zoom, centerY);
-  ctx.lineTo(centerX + 7 / zoom, centerY);
-  ctx.moveTo(centerX, centerY - 7 / zoom);
-  ctx.lineTo(centerX, centerY + 7 / zoom);
+  ctx.moveTo(centerX - 7, centerY);
+  ctx.lineTo(centerX + 7, centerY);
+  ctx.moveTo(centerX, centerY - 7);
+  ctx.lineTo(centerX, centerY + 7);
   ctx.stroke();
-
-  ctx.restore();
-}
-
-/**
- * Renders a frame's pixel map into a small thumbnail canvas with crisp pixel scaling.
- */
-export function renderThumbnailToCanvas(
-  targetCanvas: HTMLCanvasElement,
-  pixels: Record<string, string>,
-  spriteWidth: number,
-  spriteHeight: number
-): void {
-  const ctx = targetCanvas.getContext('2d');
-  if (!ctx) return;
-
-  const tw = targetCanvas.width;
-  const th = targetCanvas.height;
-  ctx.clearRect(0, 0, tw, th);
-
-  // Background
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, tw, th);
-
-  const scaleX = tw / Math.max(1, spriteWidth);
-  const scaleY = th / Math.max(1, spriteHeight);
-
-  ctx.imageSmoothingEnabled = false;
-
-  for (const key of Object.keys(pixels)) {
-    const comma = key.indexOf(',');
-    if (comma === -1) continue;
-    const x = parseInt(key.slice(0, comma), 10);
-    const y = parseInt(key.slice(comma + 1), 10);
-    ctx.fillStyle = pixels[key];
-    ctx.fillRect(Math.floor(x * scaleX), Math.floor(y * scaleY), Math.ceil(scaleX), Math.ceil(scaleY));
-  }
-}
-
-/**
- * Renders a single layer item transform onto the canvas (no placeholder rectangles, purely pivot / transform).
- */
-export function drawRenderItem(
-  ctx: CanvasRenderingContext2D,
-  item: CanvasRenderItem,
-  isSelected: boolean = false,
-  tintColor?: string,
-  alphaOverride?: number
-): void {
-  // Purely handles layer transform context if needed; placeholder rectangles removed.
-  ctx.save();
-  const [a, b, c, d, tx, ty] = item.matrix;
-  ctx.transform(a, b, c, d, tx, ty);
-  ctx.globalAlpha = alphaOverride ?? item.opacity;
-
-  // If selected layer, render its pivot point dot
-  if (isSelected) {
-    ctx.fillStyle = '#e43b44';
-    ctx.beginPath();
-    ctx.arc(0, 0, 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   ctx.restore();
 }

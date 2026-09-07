@@ -1,4 +1,4 @@
-import { $reactive, ReactiveDeepData } from 'jq79';
+import { $reactive, $toRaw, ReactiveDeepData } from 'jq79';
 /**
  * Project document state management service.
  */
@@ -73,6 +73,20 @@ export interface ProjectState {
 
 type ProjectListener = (state: ProjectState) => void;
 
+/**
+ * A single undoable step. Pixel edits — by far the most frequent — store only the
+ * affected layer frame maps; everything structural falls back to a document snapshot.
+ */
+type PixelChange = { layerId: string; frame: number; before: PixelMap; after: PixelMap };
+type HistoryEntry =
+  | { kind: 'snapshot'; json: string }
+  | { kind: 'pixels'; changes: PixelChange[] };
+
+export type PixelMap = Record<string, string>;
+
+/** Shared empty map so an absent frame keeps a stable identity between reads. */
+const EMPTY_PIXELS: PixelMap = {};
+
 class ProjectService {
   public readonly state: ReactiveDeepData<ProjectState>;
 
@@ -106,9 +120,18 @@ class ProjectService {
 
   }
   private listeners: Set<ProjectListener> = new Set();
-  private undoStack: string[] = [];
-  private redoStack: string[] = [];
+  private undoStack: HistoryEntry[] = [];
+  private redoStack: HistoryEntry[] = [];
   private readonly maxHistoryLength = 50;
+  /** Serialization is lazy: mutations only mark the cached JSON stale. */
+  private jsonDirty: boolean = true;
+  private engineJsonCache: string = '';
+  private engineJsonDirty: boolean = true;
+  /** Per-frame counters so thumbnails can be cached by content instead of by guesswork. */
+  private frameRevisions: Record<number, number> = {};
+  private framesEpoch: number = 0;
+  private pendingPixelEdit: PixelChange[] | null = null;
+  private lastHistoryStructural: boolean = true;
   private pixelDragBaseline: Record<string, string> | null = null;
   private draggedPixelInitial: { x: number; y: number; color: string } | null = null;
 
@@ -204,14 +227,79 @@ class ProjectService {
   }
 
   private pushUndoSnapshot(): void {
-    if (!this.state.rawJson) {
-      this.updateJson();
-    }
-    this.undoStack.push(this.state.rawJson);
+    this.undoStack.push({ kind: 'snapshot', json: this.getRawJson() });
     if (this.undoStack.length > this.maxHistoryLength) {
       this.undoStack.shift();
     }
     this.redoStack = [];
+  }
+
+  /**
+   * Starts recording a pixel-only edit. Only the affected layer frame maps are captured,
+   * so a brush stroke never serializes the document.
+   */
+  private beginPixelEdit(targets: Array<{ layerId: string; frame: number }>): void {
+    const changes: PixelChange[] = [];
+    for (const target of targets) {
+      const layer = this.state.layers.find((l) => l.id === target.layerId);
+      if (!layer) continue;
+      if (!layer.frame_pixels) layer.frame_pixels = {};
+      changes.push({
+        layerId: target.layerId,
+        frame: target.frame,
+        before: { ...(layer.frame_pixels[target.frame] || {}) },
+        after: {},
+      });
+    }
+    this.pendingPixelEdit = changes.length > 0 ? changes : null;
+  }
+
+  /** Closes the recording opened by `beginPixelEdit` and pushes it onto the undo stack. */
+  private commitPixelEdit(): void {
+    const changes = this.pendingPixelEdit;
+    this.pendingPixelEdit = null;
+    if (!changes) return;
+
+    let touched = false;
+    for (const change of changes) {
+      const layer = this.state.layers.find((l) => l.id === change.layerId);
+      change.after = { ...(layer?.frame_pixels?.[change.frame] || {}) };
+      const beforeKeys = Object.keys(change.before);
+      const afterKeys = Object.keys(change.after);
+      if (beforeKeys.length !== afterKeys.length) {
+        touched = true;
+        continue;
+      }
+      for (const key of afterKeys) {
+        if (change.before[key] !== change.after[key]) {
+          touched = true;
+          break;
+        }
+      }
+    }
+    if (!touched) return;
+
+    this.undoStack.push({ kind: 'pixels', changes });
+    if (this.undoStack.length > this.maxHistoryLength) {
+      this.undoStack.shift();
+    }
+    this.redoStack = [];
+  }
+
+  private applyPixelChanges(changes: PixelChange[], direction: 'before' | 'after'): void {
+    const frames = new Set<number>();
+    for (const change of changes) {
+      const layer = this.state.layers.find((l) => l.id === change.layerId);
+      if (!layer) continue;
+      if (!layer.frame_pixels) layer.frame_pixels = {};
+      layer.frame_pixels[change.frame] = { ...change[direction] };
+      frames.add(change.frame);
+    }
+    for (const frame of frames) {
+      this.recomposeFrame(frame);
+    }
+    this.updateJson();
+    this.notify();
   }
 
   public canUndo(): boolean {
@@ -223,24 +311,44 @@ class ProjectService {
   }
 
   public undo(): boolean {
-    if (this.undoStack.length === 0) return false;
-    if (!this.state.rawJson) {
-      this.updateJson();
+    const entry = this.undoStack.pop();
+    if (!entry) return false;
+
+    if (entry.kind === 'pixels') {
+      this.redoStack.push(entry);
+      this.lastHistoryStructural = false;
+      this.applyPixelChanges(entry.changes, 'before');
+      return true;
     }
-    this.redoStack.push(this.state.rawJson);
-    const prevJson = this.undoStack.pop()!;
-    this.setProjectJson(prevJson);
+
+    this.redoStack.push({ kind: 'snapshot', json: this.getRawJson() });
+    this.lastHistoryStructural = true;
+    this.setProjectJson(entry.json);
     return true;
   }
 
+  /**
+   * Whether the last undo/redo changed anything the WASM engine cares about. Pixel-only
+   * steps never do, so the caller can skip reloading the engine.
+   */
+  public didLastHistoryChangeStructure(): boolean {
+    return this.lastHistoryStructural;
+  }
+
   public redo(): boolean {
-    if (this.redoStack.length === 0) return false;
-    if (!this.state.rawJson) {
-      this.updateJson();
+    const entry = this.redoStack.pop();
+    if (!entry) return false;
+
+    if (entry.kind === 'pixels') {
+      this.undoStack.push(entry);
+      this.lastHistoryStructural = false;
+      this.applyPixelChanges(entry.changes, 'after');
+      return true;
     }
-    this.undoStack.push(this.state.rawJson);
-    const nextJson = this.redoStack.pop()!;
-    this.setProjectJson(nextJson);
+
+    this.undoStack.push({ kind: 'snapshot', json: this.getRawJson() });
+    this.lastHistoryStructural = true;
+    this.setProjectJson(entry.json);
     return true;
   }
 
@@ -377,11 +485,16 @@ class ProjectService {
             layer.visible = true;
           }
         }
+        this.invalidateAllFrames();
         const total = this.state.meta.total_frames || 1;
         for (let i = 0; i < total; i++) {
-          this.state.frame_pixels[i] = this.getCompositeFramePixels(i);
+          this.recomposeFrame(i);
         }
       }
+
+      // Migrations above changed the document, so the cached serialization is stale.
+      this.jsonDirty = true;
+      this.engineJsonDirty = true;
 
       const validSelected = this.state.layers.some((l) => l.id === this.state.selectedLayerId);
       if (!validSelected && this.state.layers.length > 0) {
@@ -434,6 +547,7 @@ class ProjectService {
    */
   public insertFrame(targetIndex: number, copyPrevious = true): number {
     this.pushUndoSnapshot();
+    this.invalidateAllFrames();
     const currentTotal = this.state.meta.total_frames;
     const insertIndex = Math.max(0, Math.min(targetIndex, currentTotal));
 
@@ -614,6 +728,7 @@ class ProjectService {
    */
   public duplicateFrame(frameIndex: number): number {
     this.pushUndoSnapshot();
+    this.invalidateAllFrames();
     const newFrameIndex = this.state.meta.total_frames;
     this.state.meta.total_frames += 1;
 
@@ -647,6 +762,7 @@ class ProjectService {
   public deleteFrame(frameIndex: number): void {
     if (this.state.meta.total_frames <= 1) return;
     this.pushUndoSnapshot();
+    this.invalidateAllFrames();
 
     this.state.layers.forEach((layer) => {
       if (!layer.tracks) return;
@@ -816,7 +932,7 @@ class ProjectService {
       this.state.layers = [...this.state.layers];
       const total = this.state.meta.total_frames || Object.keys(this.state.frame_pixels).length || 1;
       for (let fIdx = 0; fIdx < total; fIdx++) {
-        this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+        this.recomposeFrame(fIdx);
       }
       this.updateJson();
       this.notify();
@@ -857,7 +973,7 @@ class ProjectService {
     this.state.layers = [...this.state.layers];
     const total = this.state.meta.total_frames || Object.keys(this.state.frame_pixels).length || 1;
     for (let fIdx = 0; fIdx < total; fIdx++) {
-      this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+      this.recomposeFrame(fIdx);
     }
     this.updateJson();
     this.notify();
@@ -969,7 +1085,7 @@ class ProjectService {
     }
 
     // Recompute composite for the current frame
-    this.state.frame_pixels[fIdx] = this.getCompositeFramePixels(fIdx);
+    this.recomposeFrame(fIdx);
 
     if (isFinal) {
       if (this.layerDragInitialTransform) {
@@ -1018,7 +1134,7 @@ class ProjectService {
       targetLayer.frame_pixels[frameIndex] = {};
     }
 
-    this.pushUndoSnapshot();
+    this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
     this.pixelDragBaseline = { ...targetLayer.frame_pixels[frameIndex] };
     const color = this.pixelDragBaseline[`${x},${y}`] || "";
     this.draggedPixelInitial = { x, y, color };
@@ -1050,11 +1166,12 @@ class ProjectService {
     }
 
     targetLayer.frame_pixels[frameIndex] = map;
-    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+    this.recomposeFrame(frameIndex);
 
     if (isFinal) {
       this.pixelDragBaseline = null;
       this.draggedPixelInitial = null;
+      this.commitPixelEdit();
       this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
     }
@@ -1068,7 +1185,7 @@ class ProjectService {
       this.state.layers[0];
     if (targetLayer) {
       targetLayer.frame_pixels[frameIndex] = { ...this.pixelDragBaseline };
-      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+      this.recomposeFrame(frameIndex);
     }
     this.pixelDragBaseline = null;
     this.draggedPixelInitial = null;
@@ -1085,6 +1202,7 @@ class ProjectService {
       return;
     }
     this.pushUndoSnapshot();
+    this.invalidateAllFrames();
 
     // Reorder frame_pixels
     const framesArray: Array<Record<string, string>> = [];
@@ -1213,10 +1331,20 @@ class ProjectService {
       }
 
       this.state.frame_pixels[f] = interpolated;
+      this.frameRevisions[f] = (this.frameRevisions[f] || 0) + 1;
     }
 
     this.updateJson();
     this.notify();
+  }
+
+  /**
+   * The already-composed pixel map for a frame. Unlike `getFramePixels` this never
+   * recomposes: the composite is maintained on edit, so the render path can read it
+   * straight through. Its identity changes exactly when the frame content changes.
+   */
+  public getFrameComposite(frameIndex: number): PixelMap {
+    return ($toRaw(this.state.frame_pixels[frameIndex]) as PixelMap) || EMPTY_PIXELS;
   }
 
   public getFramePixels(frameIndex: number, layerId?: string | null): Record<string, string> {
@@ -1269,26 +1397,27 @@ class ProjectService {
   }
 
   public setPixel(frameIndex: number, x: number, y: number, color: string, layerId?: string): void {
-    this.pushUndoSnapshot();
     const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
       this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
       this.state.layers[0];
+    if (targetLayer) this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
     if (targetLayer) {
       if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
       if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
       targetLayer.frame_pixels[frameIndex][`${x},${y}`] = color;
     }
-    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+    this.commitPixelEdit();
+    this.recomposeFrame(frameIndex);
     this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
   }
 
   public setPixels(frameIndex: number, pixels: Array<{ x: number; y: number }>, color: string, layerId?: string): void {
-    this.pushUndoSnapshot();
     const targetLayer = (layerId && this.state.layers.find((l) => l.id === layerId)) ||
       this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
       this.state.layers[0];
+    if (targetLayer) this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
     if (targetLayer) {
       if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
       if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
@@ -1297,7 +1426,8 @@ class ProjectService {
         map[`${p.x},${p.y}`] = color;
       }
     }
-    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+    this.commitPixelEdit();
+    this.recomposeFrame(frameIndex);
     this.autoRecalculateGroupsForFrame(frameIndex);
     this.updateJson();
     this.notify();
@@ -1308,9 +1438,10 @@ class ProjectService {
       this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
       this.state.layers[0];
     if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
-      this.pushUndoSnapshot();
+      this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
       delete targetLayer.frame_pixels[frameIndex][`${x},${y}`];
-      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+      this.commitPixelEdit();
+      this.recomposeFrame(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
@@ -1322,12 +1453,13 @@ class ProjectService {
       this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
       this.state.layers[0];
     if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
-      this.pushUndoSnapshot();
+      this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
       const map = targetLayer.frame_pixels[frameIndex];
       for (const p of pixels) {
         delete map[`${p.x},${p.y}`];
       }
-      this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+      this.commitPixelEdit();
+      this.recomposeFrame(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
       this.updateJson();
       this.notify();
@@ -1449,6 +1581,7 @@ class ProjectService {
     this.state.meta.total_frames = target.total_frames;
     this.state.meta.fps = target.fps;
     this.state.frame_pixels = { ...target.frame_pixels };
+    this.invalidateAllFrames();
 
     // Restore layer groups for this animation
     this.state.layers.forEach((l) => {
@@ -1485,7 +1618,30 @@ class ProjectService {
     }
   }
 
+  /**
+   * Marks the serialized document stale. Serializing a full project costs tens of
+   * milliseconds and grows with the sprite, so it happens on demand (save, export,
+   * snapshot) rather than on every edit.
+   */
   private updateJson(): void {
+    this.syncActiveClipMeta();
+    this.jsonDirty = true;
+    this.engineJsonDirty = true;
+  }
+
+  /** Cheap half of the clip sync, kept eager so animation tabs never show stale counts. */
+  private syncActiveClipMeta(): void {
+    const activeClip = this.state.animations.find((a) => a.id === this.state.activeAnimationId);
+    if (!activeClip) return;
+    if (activeClip.total_frames !== this.state.meta.total_frames) {
+      activeClip.total_frames = this.state.meta.total_frames;
+    }
+    if (activeClip.fps !== this.state.meta.fps) {
+      activeClip.fps = this.state.meta.fps;
+    }
+  }
+
+  private buildJson(): string {
     this.syncActiveAnimation();
     const obj = {
       version: '1.0.0',
@@ -1496,11 +1652,89 @@ class ProjectService {
       animations: this.state.animations,
       activeAnimationId: this.state.activeAnimationId,
     };
-    this.state.rawJson = JSON.stringify(obj, null, 2);
+    return JSON.stringify(obj);
   }
 
+  /** The full document, including pixels. Built on demand and cached until the next edit. */
   public getRawJson(): string {
+    if (this.jsonDirty || !this.state.rawJson) {
+      this.state.rawJson = this.buildJson();
+      this.jsonDirty = false;
+    }
     return this.state.rawJson;
+  }
+
+  /**
+   * The document as the WASM engine actually consumes it: metadata, sheets and layer
+   * transforms/tracks. `frame_pixels` is deliberately left out because the Rust `Layer`
+   * struct does not declare it — shipping pixels means parsing megabytes to discard them.
+   */
+  public getEngineJson(): string {
+    if (!this.engineJsonDirty && this.engineJsonCache) return this.engineJsonCache;
+    const layers = this.state.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      parent_id: layer.parent_id ?? null,
+      z_index: layer.z_index ?? 0,
+      visible: layer.visible !== false,
+      sheet_id: layer.sheet_id,
+      default_frame: layer.default_frame,
+      default_transform: layer.default_transform,
+      relative_to_parent: layer.relative_to_parent !== false,
+      tracks: layer.tracks,
+    }));
+    this.engineJsonCache = JSON.stringify({
+      version: '1.0.0',
+      meta: this.state.meta,
+      sheets: this.state.sheets || [],
+      layers,
+    });
+    this.engineJsonDirty = false;
+    return this.engineJsonCache;
+  }
+
+  /**
+   * Recomposes one frame from its layers and stamps it so thumbnail caches invalidate
+   * exactly when the content changed.
+   */
+  private recomposeFrame(frameIndex: number): void {
+    this.state.frame_pixels[frameIndex] = this.getCompositeFramePixels(frameIndex);
+    this.frameRevisions[frameIndex] = (this.frameRevisions[frameIndex] || 0) + 1;
+  }
+
+  /** Invalidates every frame stamp; used when frames are inserted, removed or reordered. */
+  private invalidateAllFrames(): void {
+    this.framesEpoch++;
+    this.frameRevisions = {};
+  }
+
+  /** Per-frame content stamps, used as thumbnail cache keys. */
+  public getFrameRevisions(): number[] {
+    const total = Math.max(1, this.state.meta.total_frames || 1);
+    const revisions: number[] = new Array(total);
+    for (let i = 0; i < total; i++) {
+      revisions[i] = this.frameRevisions[i] || 0;
+    }
+    return revisions;
+  }
+
+  /**
+   * Cheap signature of everything the layer tree renders, so the tree is only rebuilt
+   * when one of those properties actually changed.
+   */
+  public getLayersStamp(): string {
+    return this.state.layers
+      .map(
+        (l) =>
+          `${l.id}|${l.name}|${l.parent_id ?? ''}|${l.z_index ?? 0}|${l.visible !== false ? 1 : 0}` +
+          `|${l.relative_to_parent !== false ? 1 : 0}|${l.groups?.length ?? 0}`
+      )
+      .join(';');
+  }
+
+  /** Compact signature of all frame stamps, cheap to compare between updates. */
+  public getFramesStamp(): string {
+    return `${this.framesEpoch}:${this.getFrameRevisions().join(',')}`;
   }
 
   public getState(): ProjectState {

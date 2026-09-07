@@ -1,6 +1,6 @@
 # Makefile — Build, Test, and Automation for Spritemotion
 
-.PHONY: all install test build up clean
+.PHONY: all install test typecheck build up clean
 
 all: build
 
@@ -9,8 +9,14 @@ install:
 	@which wasm-pack >/dev/null 2>&1 || (echo "wasm-pack not found. Installing via cargo..." && cargo install wasm-pack)
 	npm install
 
-## test: Run Rust unit and integration test suite
+## typecheck: Type-check the TypeScript sources
+typecheck:
+	npx tsc --noEmit
+
+## test: Run the frontend type check and unit tests, then the Rust suite
 test:
+	npx tsc --noEmit
+	npx vitest run
 	cargo test
 
 ## build: Compile native Rust release library, WebAssembly package, and frontend bundle
