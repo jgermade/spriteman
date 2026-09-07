@@ -53,7 +53,7 @@ class PwaService {
   }
 
   public async registerServiceWorker(): Promise<void> {
-    if ('serviceWorker' in navigator && process.env.NODE_ENV !== 'development') {
+    if ('serviceWorker' in navigator && !import.meta.env.DEV) {
       try {
         await navigator.serviceWorker.register('./sw.js');
         console.log('[PWA] ServiceWorker registered successfully');

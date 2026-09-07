@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   isOpen,
   currentTab,
   savedFiles,
@@ -53,36 +54,36 @@
           :class="{ active: currentTab === 'new' || !currentTab }"
           @click="currentTab = 'new'"
         >
-          📄 New Project
+          {{ t('modal.new_tab') }}
         </button>
         <button
           class="modal-tab"
           :class="{ active: currentTab === 'open' }"
           @click="currentTab = 'open'"
         >
-          📁 Open Project ({{ savedFiles ? savedFiles.length : 0 }})
+          {{ t('modal.open_tab', { count: savedFiles ? savedFiles.length : 0 }) }}
         </button>
       </div>
-      <button class="modal-close" title="Close" @click="onClose?.()">✕</button>
+      <button class="modal-close" :title="t('modal.close_title')" @click="onClose?.()">✕</button>
     </div>
 
     <div class="modal-body">
       <!-- New Tab -->
       <div :if="currentTab === 'new' || !currentTab">
         <div class="form-group">
-          <label class="form-label">Project Name:</label>
+          <label class="form-label">{{ t('modal.project_name') }}</label>
           <input
             id="input-project-name"
             type="text"
             class="form-input"
             :value="projectName"
             @input="projectName = $event.target.value"
-            placeholder="e.g. hero_idle"
+            :placeholder="t('modal.project_name_placeholder')"
           />
         </div>
 
         <div class="form-group">
-          <label class="form-label">Pixel Canvas Size:</label>
+          <label class="form-label">{{ t('modal.canvas_size') }}</label>
           <select
             id="select-project-size"
             class="form-select"
@@ -91,39 +92,39 @@
           >
             <option
               :each="p in standardSizes"
-              :key="p.label"
+              :key="p.labelKey"
               :value="`${p.width}x${p.height}`"
-            >{{ p.label }}</option>
+            >{{ t(p.labelKey) }}</option>
           </select>
-          <span class="form-hint">Starts with 1 initial frame and centered base layer.</span>
+          <span class="form-hint">{{ t('modal.create_hint') }}</span>
         </div>
 
         <div class="form-group">
-          <label class="form-label">Animation Speed (FPS):</label>
+          <label class="form-label">{{ t('modal.fps') }}</label>
           <select
             id="select-project-fps"
             class="form-select"
             :value="fps"
             @change="fps = $event.target.value"
           >
-            <option value="6">6 FPS (Retro slow)</option>
-            <option value="8">8 FPS (Classic walk)</option>
-            <option value="12">12 FPS (Standard pixel art)</option>
-            <option value="16">16 FPS (Smooth retro)</option>
-            <option value="24">24 FPS (Cinematic)</option>
+            <option value="6">{{ t('fps.6') }}</option>
+            <option value="8">{{ t('fps.8') }}</option>
+            <option value="12">{{ t('fps.12') }}</option>
+            <option value="16">{{ t('fps.16') }}</option>
+            <option value="24">{{ t('fps.24') }}</option>
           </select>
         </div>
 
         <div class="modal-footer">
           <button id="btn-create-project" class="btn-primary" @click="handleCreate">
-            ✨ Create Project
+            {{ t('modal.create_button') }}
           </button>
         </div>
       </div>
 
       <!-- Open Tab -->
       <div :else class="open-section">
-        <span class="section-title">Saved in WASMFS</span>
+        <span class="section-title">{{ t('modal.storage_badge') }}</span>
 
         <div :if="!savedFiles || savedFiles.length === 0" class="empty-file-list">
           No saved projects found in WASMFS yet.
@@ -134,7 +135,7 @@
               <span class="file-name">📄 {{ f.name }}</span>
               <span class="file-date">{{ formatDate(f.updatedAt) }}</span>
             </div>
-            <button class="btn-open-file" @click="handleOpen(f.name)">Open</button>
+            <button class="btn-open-file" @click="handleOpen(f.name)">{{ t('modal.open') }}</button>
           </div>
         </div>
 
@@ -142,11 +143,11 @@
 
         <div class="external-actions">
           <button id="btn-open-sample" class="btn-secondary" @click="handleSample">
-            🌟 Open Sample Walk Project
+            {{ t('modal.sample') }}
           </button>
 
           <label class="btn-secondary file-upload-label">
-            📥 Import JSON File
+            {{ t('modal.import') }}
             <input id="file-upload-json" type="file" accept=".json" style="display: none;" @change="handleFileInput" />
           </label>
         </div>

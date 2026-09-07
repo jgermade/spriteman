@@ -7,6 +7,11 @@
   const { storageService } = await import('../services/storage.service');
   const { tabsService } = await import('../services/tabs.service');
   const { canvasService } = await import('../services/canvas.service');
+  const { i18nService } = await import('../services/i18n.service');
+
+  // Messages must be in place before any child component renders.
+  await i18nService.init();
+  const t = i18nService.t;
 
   const CanvasStageComponent = _d(await import('../components/CanvasStage.html'));
   const FrameStripComponent = _d(await import('../components/FrameStrip.html'));
@@ -20,17 +25,19 @@
 
   const { STANDARD_PIXEL_SIZES, PIXEL_ART_PALETTE } = await import('../helpers/palette.helper');
   const { formatMatrix } = await import('../helpers/format.helper');
+  const { $toRaw } = await import('jq79');
+  const { findRenderItem } = await import('../wasm/index');
 
   let hasActiveProject = false;
   let canvasWidth = 64;
   let canvasHeight = 64;
   let fps = 12;
   let isInstallable = pwaService.getState().isInstallable;
-  let saveButtonText = '💾 Save';
+  let saveButtonText = t('app.save');
 
-  $: sizeBadgeText = `${canvasWidth || 64} × ${canvasHeight || 64} px`;
-  $: fpsBadgeText = `${fps || 12} FPS`;
-  $: currentSaveText = saveButtonText || '💾 Save';
+  $: sizeBadgeText = t('app.size_badge', { width: canvasWidth || 64, height: canvasHeight || 64 });
+  $: fpsBadgeText = t('app.fps_badge', { fps: fps || 12 });
+  $: currentSaveText = saveButtonText || t('app.save');
 
   let canvasStage: any;
   let frameStrip: any;
@@ -71,26 +78,23 @@
     pwaService.promptInstall();
   };
 
-  const handleUndo = () => {
-    if (projectService.undo()) {
-      const raw = projectService.getRawJson();
-      animationService.reloadProject(raw);
+  /** Re-syncs the engine after a history step that changed more than pixels. */
+  const afterHistoryStep = () => {
+    if (projectService.didLastHistoryChangeStructure()) {
+      animationService.reloadProject(projectService.getEngineJson());
       const totalFrames = projectService.getState().meta.total_frames;
       const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
       animationService.seek(curF);
-      saveCurrentProject();
     }
+    saveCurrentProject();
+  };
+
+  const handleUndo = () => {
+    if (projectService.undo()) afterHistoryStep();
   };
 
   const handleRedo = () => {
-    if (projectService.redo()) {
-      const raw = projectService.getRawJson();
-      animationService.reloadProject(raw);
-      const totalFrames = projectService.getState().meta.total_frames;
-      const curF = Math.min(Math.round(animationService.getState().currentFrame), Math.max(0, totalFrames - 1));
-      animationService.seek(curF);
-      saveCurrentProject();
-    }
+    if (projectService.redo()) afterHistoryStep();
   };
 
   const swapPaletteColors = () => {
@@ -101,15 +105,83 @@
     canvasService.setColors(pixelPalette.data.primaryColor, pixelPalette.data.secondaryColor);
   };
 
-  const saveCurrentProject = async (): Promise<void> => {
-    if (!activeProjectName) return;
-    const json = projectService.getRawJson();
-    await storageService.saveFile(activeProjectName, json);
+  let saveTimer: number | null = null;
+  let saveLabelTimer: number | null = null;
+  let savePending = false;
 
-    saveButtonText = '✓ Saved!';
-    setTimeout(() => {
-      saveButtonText = '💾 Save';
-    }, 1200);
+  const setSaveLabel = (text: string, revertAfter?: number) => {
+    saveButtonText = text;
+    if (saveLabelTimer !== null) {
+      clearTimeout(saveLabelTimer);
+      saveLabelTimer = null;
+    }
+    if (revertAfter) {
+      saveLabelTimer = window.setTimeout(() => {
+        saveButtonText = t('app.save');
+        saveLabelTimer = null;
+      }, revertAfter);
+    }
+  };
+
+  /** Writes the document to storage. Serialization happens here, not on every edit. */
+  const flushSave = async (): Promise<void> => {
+    if (saveTimer !== null) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    if (!activeProjectName || !savePending) return;
+    savePending = false;
+
+    try {
+      await storageService.saveFile(activeProjectName, projectService.getRawJson());
+      setSaveLabel(t('app.saved'), 1200);
+    } catch (err: any) {
+      // A failed save used to disappear into an un-awaited promise; make it visible.
+      savePending = true;
+      setSaveLabel(t('app.save_failed'));
+      console.error('[storage] Failed to save project:', err);
+      const message =
+        err?.name === 'StorageQuotaError'
+          ? t('storage.quota_exceeded', { name: activeProjectName })
+          : t('storage.save_failed');
+      window.alert(message);
+    }
+  };
+
+  /**
+   * Marks the document dirty and schedules a write. Edits arrive in bursts (one per
+   * stroke, per drag step), so the actual serialize + write happens once things settle.
+   */
+  const saveCurrentProject = (): void => {
+    if (!activeProjectName) return;
+    savePending = true;
+    setSaveLabel(t('app.saving'));
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      saveTimer = null;
+      // Serializing the document is the one heavy step left; run it when the main thread
+      // is idle so it never lands in the middle of a stroke.
+      const idle = (window as any).requestIdleCallback;
+      if (typeof idle === 'function') {
+        idle(() => flushSave(), { timeout: 2000 });
+      } else {
+        flushSave();
+      }
+    }, 500);
+  };
+
+  /** Downloads the current document, the escape hatch when browser storage is full. */
+  const exportCurrentProject = (): void => {
+    if (!activeProjectName) return;
+    const blob = new Blob([projectService.getRawJson()], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${activeProjectName}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   const loadActiveProject = async (projectName: string): Promise<void> => {
@@ -122,13 +194,14 @@
         await storageService.saveFile(projectName, json);
       } else {
         // Create fallback project with 1 frame
-        json = projectService.createNewProject(projectName, 64, 64, 128);
+        // 12 fps is the default playback rate; the fourth argument is fps, not frames.
+        json = projectService.createNewProject(projectName, 64, 64, 12);
         await storageService.saveFile(projectName, json);
       }
     }
 
     projectService.setProjectJson(json);
-    await animationService.reloadProject(json);
+    await animationService.reloadProject(projectService.getEngineJson());
     animationService.seek(0);
     syncPivotState();
   };
@@ -188,6 +261,85 @@
     await loadActiveProject(state.activeTab);
   };
 
+  /**
+   * Writes a value into a child component only when it actually changed. jq79 runs the
+   * effects for a property the moment it is assigned, so assigning a dozen unchanged
+   * fields per notification re-rendered the panel a dozen times over.
+   */
+  const setField = (component: any, key: string, value: any): void => {
+    if (!component?.data) return;
+    // Both sides may be reactive proxies wrapping the same underlying object — one from
+    // the project store, one from the component store — so compare the raw values.
+    // Comparing proxies makes every write look like a change and triggers a deep diff.
+    const next = value && typeof value === 'object' ? $toRaw(value) : value;
+    const current = component.data[key];
+    const currentRaw = current && typeof current === 'object' ? $toRaw(current) : current;
+    if (currentRaw !== next) {
+      component.data[key] = next;
+    }
+  };
+
+  let lastFramesStamp = '';
+  let lastLayersStamp = '';
+  // Shared so "this layer has no groups" keeps a stable identity between updates;
+  // a fresh [] every time reads as a change and rebuilds the whole frame reel.
+  const NO_GROUPS: any[] = [];
+
+  /** Pushes the shared editor state into the panels, skipping anything unchanged. */
+  const syncPanels = (projState: any, animState: any): void => {
+    const currentInt = Math.round(animState.currentFrame);
+    const activeLayer = (projState.layers || []).find((l: any) => l && l.id === projState.selectedLayerId);
+    const layerGroups = activeLayer?.groups || NO_GROUPS;
+    const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
+    const isPivot = canvasService.isPivotMode();
+
+    if (frameStrip?.data) {
+      setField(frameStrip, 'currentFrame', animState.currentFrame);
+      setField(frameStrip, 'totalFrames', projState.meta.total_frames);
+      setField(frameStrip, 'isPlaying', animState.isPlaying);
+      setField(frameStrip, 'framePixels', projState.frame_pixels);
+      setField(frameStrip, 'spriteWidth', projState.meta.canvas_width);
+      setField(frameStrip, 'spriteHeight', projState.meta.canvas_height);
+      setField(frameStrip, 'animations', projState.animations);
+      setField(frameStrip, 'activeAnimationId', projState.activeAnimationId);
+      setField(frameStrip, 'layerGroups', layerGroups);
+      setField(frameStrip, 'activeGroup', activeGroup);
+      setField(frameStrip, 'isPivotMode', isPivot);
+      setField(frameStrip, 'canUndo', projectService.canUndo());
+      setField(frameStrip, 'canRedo', projectService.canRedo());
+
+      // Thumbnails are keyed by these stamps, so they refresh exactly when content does.
+      const stamp = projectService.getFramesStamp();
+      if (stamp !== lastFramesStamp) {
+        lastFramesStamp = stamp;
+        frameStrip.data.frameRevisions = projectService.getFrameRevisions();
+      }
+    }
+
+    if (animState.resolvedFrame && inspectorPanel?.data) {
+      // Only the selected layer is materialized out of the packed frame buffer.
+      const selectedItem = findRenderItem(animState.resolvedFrame, projState.selectedLayerId);
+      inspectorPanel.data.item = selectedItem;
+      setField(inspectorPanel, 'matrixText', selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '');
+    }
+  };
+
+  /**
+   * Hands the canvas the frame content. The composite is maintained by the project
+   * service, so this reads it instead of recomposing, and the moving-layer highlight is
+   * registered as a provider that only runs when the highlight is drawn.
+   */
+  const syncCanvasContent = (projState: any, animState: any): void => {
+    const currentInt = Math.round(animState.currentFrame);
+    const onionPixels =
+      animState.onionSkinEnabled && currentInt > 0 ? projectService.getFrameComposite(currentInt - 1) : null;
+    canvasService.setFramePixels(projectService.getFrameComposite(currentInt), onionPixels);
+    canvasService.setActiveLayerSource(
+      `${currentInt}:${projState.selectedLayerId}:${projectService.getFramesStamp()}`,
+      () => projectService.getActiveLayerMovingPixels(currentInt)
+    );
+  };
+
   const bindServices = () => {
     // 1. Tabs service synchronization
     tabsService.subscribe((state: any) => {
@@ -197,68 +349,26 @@
     // 2. Animation service updates
     animationService.subscribe((animState: any) => {
       const proj = projectService.getState();
-      const currentInt = Math.round(animState.currentFrame);
-      const activeLayer = proj.layers.find((l: any) => l.id === proj.selectedLayerId);
-      const layerGroups = activeLayer?.groups || [];
-      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
-      const isPivot = canvasService.isPivotMode();
-
-      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
-
-      if (frameStrip?.data) {
-        frameStrip.data.currentFrame = animState.currentFrame;
-        frameStrip.data.totalFrames = animState.totalFrames;
-        frameStrip.data.isPlaying = animState.isPlaying;
-        frameStrip.data.framePixels = proj.frame_pixels;
-        frameStrip.data.spriteWidth = proj.meta.canvas_width;
-        frameStrip.data.spriteHeight = proj.meta.canvas_height;
-        frameStrip.data.animations = proj.animations;
-        frameStrip.data.activeAnimationId = proj.activeAnimationId;
-        frameStrip.data.layerGroups = layerGroups;
-        frameStrip.data.activeGroup = activeGroup;
-        frameStrip.data.isPivotMode = isPivot;
-        frameStrip.data.canUndo = projectService.canUndo();
-        frameStrip.data.canRedo = projectService.canRedo();
-      }
-
-      const currentPixels = projectService.getFramePixels(currentInt);
-      const prevInt = Math.max(0, currentInt - 1);
-      const onionPixels = animState.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
-      const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
-      canvasService.setFramePixels(currentPixels, onionPixels, movingPixels);
-
+      syncPanels(proj, animState);
+      syncCanvasContent(proj, animState);
       syncPivotState();
-
-      if (animState.resolvedFrame) {
-        const selectedId = proj.selectedLayerId;
-        const onionItems = animState.onionSkinFrame?.items ?? null;
-        canvasService.render(animState.resolvedFrame.items, selectedId, onionItems);
-
-        const selectedItem = animState.resolvedFrame.items.find((i: any) => i.layer_id === selectedId);
-        if (inspectorPanel?.data) {
-          inspectorPanel.data.item = selectedItem || null;
-          inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
-        }
-      }
     });
 
     // 3. Project service updates
     projectService.subscribe((projState: any) => {
-      const isPivot = canvasService.isPivotMode();
-      if (hierarchyTree?.data) {
-        hierarchyTree.data.layers = [...projState.layers];
-        hierarchyTree.data.selectedLayerId = projState.selectedLayerId;
-        hierarchyTree.data.isPivotMode = isPivot;
-      }
-
       const anim = animationService.getState();
-      const currentInt = Math.round(anim.currentFrame);
-      const activeLayer = (projState.layers || []).find((l: any) => l && l.id === projState.selectedLayerId);
-      const isLayerVisible = activeLayer ? activeLayer.visible !== false : true;
-      const layerGroups = activeLayer?.groups || [];
-      const activeGroup = projectService.getActiveLayerGroupForFrame(currentInt);
 
-      syncPivotState();
+      if (hierarchyTree?.data) {
+        // `getState()` hands back a fresh array every time, so compare content instead of
+        // identity — otherwise the whole tree re-renders on every pixel edit.
+        const layersStamp = projectService.getLayersStamp();
+        if (layersStamp !== lastLayersStamp) {
+          lastLayersStamp = layersStamp;
+          hierarchyTree.data.layers = projState.layers;
+        }
+        setField(hierarchyTree, 'selectedLayerId', projState.selectedLayerId);
+        setField(hierarchyTree, 'isPivotMode', canvasService.isPivotMode());
+      }
 
       canvasWidth = projState.meta.canvas_width;
       canvasHeight = projState.meta.canvas_height;
@@ -266,42 +376,15 @@
 
       canvasService.setCanvasSize(projState.meta.canvas_width, projState.meta.canvas_height);
       if (animationSettings?.data) {
-        animationSettings.data.width = projState.meta.canvas_width;
-        animationSettings.data.height = projState.meta.canvas_height;
-        animationSettings.data.fps = projState.meta.fps;
-        animationSettings.data.zoom = currentZoom;
+        setField(animationSettings, 'width', projState.meta.canvas_width);
+        setField(animationSettings, 'height', projState.meta.canvas_height);
+        setField(animationSettings, 'fps', projState.meta.fps);
+        setField(animationSettings, 'zoom', currentZoom);
       }
 
-      const currentPixels = projectService.getFramePixels(currentInt);
-      const prevInt = Math.max(0, currentInt - 1);
-      const onionPixels = anim.onionSkinEnabled && currentInt > 0 ? projectService.getFramePixels(prevInt) : null;
-      const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
-      canvasService.setFramePixels(currentPixels, onionPixels, movingPixels);
-
-      if (frameStrip?.data) {
-        frameStrip.data.currentFrame = anim.currentFrame;
-        frameStrip.data.totalFrames = projState.meta.total_frames;
-        frameStrip.data.isPlaying = anim.isPlaying;
-        frameStrip.data.framePixels = projState.frame_pixels;
-        frameStrip.data.spriteWidth = projState.meta.canvas_width;
-        frameStrip.data.spriteHeight = projState.meta.canvas_height;
-        frameStrip.data.animations = projState.animations;
-        frameStrip.data.activeAnimationId = projState.activeAnimationId;
-        frameStrip.data.layerGroups = layerGroups;
-        frameStrip.data.activeGroup = activeGroup;
-        frameStrip.data.isPivotMode = isPivot;
-        frameStrip.data.canUndo = projectService.canUndo();
-        frameStrip.data.canRedo = projectService.canRedo();
-      }
-
-      if (anim.resolvedFrame) {
-        const selectedItem = anim.resolvedFrame.items.find((i: any) => i.layer_id === projState.selectedLayerId);
-        if (inspectorPanel?.data) {
-          inspectorPanel.data.item = selectedItem || null;
-          inspectorPanel.data.matrixText = selectedItem?.matrix ? formatMatrix(selectedItem.matrix) : '';
-        }
-        canvasService.render(anim.resolvedFrame.items, projState.selectedLayerId, anim.onionSkinFrame?.items);
-      }
+      syncPivotState();
+      syncPanels(projState, anim);
+      syncCanvasContent(projState, anim);
     });
 
     // 4. PWA state updates
@@ -352,7 +435,7 @@
       if ((e.key === '+' || e.key === '=' || e.code === 'NumpadAdd') && !isCmdOrCtrl && !e.altKey) {
         e.preventDefault();
         const newIdx = projectService.addFrame(true);
-        animationService.reloadProject(projectService.getRawJson());
+        animationService.reloadProject(projectService.getEngineJson());
         animationService.seek(newIdx);
         saveCurrentProject();
         return;
@@ -415,6 +498,7 @@
 
   // Mount CanvasStage Component
   canvasStage = CanvasStageComponent.mount(root.querySelector('.canvas-stage-wrapper'), {
+    t,
     canvasService,
     onPaintStroke: (pixels: any, color: string) => {
       const currentInt = Math.round(animationService.getState().currentFrame);
@@ -457,10 +541,15 @@
       const currentInt = Math.round(animationService.getState().currentFrame);
       if (selectedId) {
         projectService.translateLayer(selectedId, deltaX, deltaY, currentInt, isFinal);
-        const movingPixels = isFinal ? projectService.getActiveLayerMovingPixels(currentInt) : null;
-        canvasService.setFramePixels(projectService.getFramePixels(currentInt), null, movingPixels);
+        // Read the composite the project already maintains, and let the highlight resolve
+        // itself lazily — a drag step must not recompose or rebuild anything eagerly.
+        canvasService.setFramePixels(projectService.getFrameComposite(currentInt), null);
+        canvasService.setActiveLayerSource(
+          `drag:${currentInt}:${selectedId}:${deltaX}:${deltaY}:${isFinal}`,
+          () => projectService.getActiveLayerMovingPixels(currentInt)
+        );
         if (isFinal) {
-          animationService.reloadProject(projectService.getRawJson());
+          animationService.reloadProject(projectService.getEngineJson());
           saveCurrentProject();
         }
       }
@@ -479,10 +568,13 @@
       const currentInt = Math.round(animationService.getState().currentFrame);
       if (selectedId) {
         projectService.movePixel(selectedId, currentInt, fromX, fromY, toX, toY, isFinal);
-        const movingPixels = projectService.getActiveLayerMovingPixels(currentInt);
-        canvasService.setFramePixels(projectService.getFramePixels(currentInt), null, movingPixels);
+        canvasService.setFramePixels(projectService.getFrameComposite(currentInt), null);
+        canvasService.setActiveLayerSource(
+          `pixel:${currentInt}:${selectedId}:${toX}:${toY}`,
+          () => projectService.getActiveLayerMovingPixels(currentInt)
+        );
         if (isFinal) {
-          animationService.reloadProject(projectService.getRawJson());
+          animationService.reloadProject(projectService.getEngineJson());
           saveCurrentProject();
         }
       }
@@ -497,6 +589,7 @@
 
   // Mount other child components
   projectTabs = ProjectTabsComponent.mount(root.querySelector('.tabs-wrapper'), {
+    t,
     tabs: [],
     activeTab: null,
     onSelectTab: (tabId: string) => tabsService.selectTab(tabId),
@@ -512,6 +605,7 @@
   });
 
   welcomeScreen = WelcomeScreenComponent.mount(root.querySelector('.welcome-screen-wrapper'), {
+    t,
     savedFiles: [],
     sizes: STANDARD_PIXEL_SIZES,
     onCreateProject: (name: string, w: number, h: number, fpsVal: number) => handleCreateProject(name, w, h, fpsVal),
@@ -521,6 +615,7 @@
   });
 
   hierarchyTree = HierarchyTreeComponent.mount(root.querySelector('.hierarchy-wrapper'), {
+    t,
     layers: [],
     selectedLayerId: null,
     isPivotMode: false,
@@ -530,27 +625,27 @@
     },
     onAddLayer: () => {
       projectService.addLayer();
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onToggleLayerRelative: (layerId: string) => {
       projectService.toggleLayerRelative(layerId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onToggleLayerVisibility: (layerId: string) => {
       projectService.toggleLayerVisibility(layerId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onRenameLayer: (layerId: string, name: string) => {
       projectService.renameLayer(layerId, name);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onDeleteLayer: (layerId: string) => {
       if (projectService.deleteLayer(layerId)) {
-        animationService.reloadProject(projectService.getRawJson());
+        animationService.reloadProject(projectService.getEngineJson());
         saveCurrentProject();
       }
     },
@@ -559,22 +654,23 @@
     },
     onReorderLayer: (layerId: string, targetIndex: number, newParentId: string | null) => {
       projectService.reorderLayer(layerId, targetIndex, newParentId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onMoveLayerUp: (layerId: string) => {
       projectService.moveLayerUp(layerId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onMoveLayerDown: (layerId: string) => {
       projectService.moveLayerDown(layerId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
   });
 
   frameStrip = FrameStripComponent.mount(root.querySelector('.framestrip-wrapper'), {
+    t,
     totalFrames: 1,
     currentFrame: 0,
     isPlaying: false,
@@ -582,6 +678,7 @@
     spriteWidth: 64,
     spriteHeight: 64,
     framePixels: {},
+    frameRevisions: [],
     animations: [],
     activeAnimationId: '',
     layerGroups: [],
@@ -604,27 +701,27 @@
       const newIdx = typeof targetIndex === 'number'
         ? projectService.insertFrame(targetIndex, true)
         : projectService.addFrame(true);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       animationService.seek(newIdx);
       saveCurrentProject();
     },
     onReorderFrame: (from: number, to: number) => {
       projectService.reorderFrame(from, to);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       animationService.seek(to);
       saveCurrentProject();
     },
     onDuplicateFrame: () => {
       const currentInt = Math.round(animationService.getState().currentFrame);
       const newIdx = projectService.duplicateFrame(currentInt);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       animationService.seek(newIdx);
       saveCurrentProject();
     },
     onDeleteFrame: () => {
       const currentInt = Math.round(animationService.getState().currentFrame);
       projectService.deleteFrame(currentInt);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       const nextInt = Math.max(0, currentInt - 1);
       animationService.seek(nextInt);
       saveCurrentProject();
@@ -634,7 +731,7 @@
       const selectedId = projectService.getState().selectedLayerId;
       if (selectedId) {
         projectService.createFrameGroup(selectedId, start, end);
-        animationService.reloadProject(projectService.getRawJson());
+        animationService.reloadProject(projectService.getEngineJson());
         saveCurrentProject();
         syncPivotState();
       }
@@ -643,7 +740,7 @@
       const selectedId = projectService.getState().selectedLayerId;
       if (selectedId) {
         projectService.deleteFrameGroup(selectedId, groupId);
-        animationService.reloadProject(projectService.getRawJson());
+        animationService.reloadProject(projectService.getEngineJson());
         saveCurrentProject();
         syncPivotState();
       }
@@ -660,16 +757,16 @@
     },
     onSelectAnimation: (animId: string) => {
       projectService.selectAnimation(animId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       animationService.seek(0);
       saveCurrentProject();
       syncPivotState();
     },
     onAddAnimation: () => {
-      const name = prompt('Nombre de la nueva animación (ej. walk, attack, jump):', 'walk');
+      const name = prompt(t('timeline.new_animation_prompt'), 'walk');
       if (name !== null) {
         projectService.addAnimation(name.trim() || undefined);
-        animationService.reloadProject(projectService.getRawJson());
+        animationService.reloadProject(projectService.getEngineJson());
         animationService.seek(0);
         saveCurrentProject();
         syncPivotState();
@@ -681,7 +778,7 @@
     },
     onDeleteAnimation: (animId: string) => {
       projectService.deleteAnimation(animId);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       animationService.seek(0);
       saveCurrentProject();
       syncPivotState();
@@ -691,11 +788,13 @@
   });
 
   inspectorPanel = InspectorPanelComponent.mount(root.querySelector('.inspector-wrapper'), {
+    t,
     item: null,
     matrixText: '',
   });
 
   pixelPalette = PixelPaletteComponent.mount(root.querySelector('.palette-wrapper'), {
+    t,
     primaryColor: '#000000',
     secondaryColor: '#ffffff',
     isTempSwapped: false,
@@ -725,6 +824,7 @@
   });
 
   animationSettings = AnimationSettingsComponent.mount(root.querySelector('.settings-wrapper'), {
+    t,
     width: 64,
     height: 64,
     fps: 12,
@@ -733,13 +833,13 @@
     onChangeCanvasSize: (w: number, h: number) => {
       projectService.setCanvasSize(w, h);
       canvasService.setCanvasSize(w, h);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onChangeFps: (fpsVal: number) => {
       projectService.setFps(fpsVal);
       animationService.setFps(fpsVal);
-      animationService.reloadProject(projectService.getRawJson());
+      animationService.reloadProject(projectService.getEngineJson());
       saveCurrentProject();
     },
     onChangeZoom: (zoomVal: number) => {
@@ -749,6 +849,7 @@
   });
 
   projectModal = ProjectModalComponent.mount(root.querySelector('.modal-wrapper'), {
+    t,
     isOpen: false,
     currentTab: 'new',
     savedFiles: [],
@@ -774,6 +875,12 @@
     },
   });
 
+  // A pending debounced write must not be lost when the tab closes or is hidden.
+  window.addEventListener('beforeunload', () => { flushSave(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSave();
+  });
+
   bindServices();
   initKeyboardShortcuts();
   await initAppFlow();
@@ -785,7 +892,7 @@
     <div class="topbar-left">
       <div class="app-logo">
         <img src="./icon-192.svg" class="logo-pixel-img" width="22" height="22" alt="Logo" />
-        <span class="logo-text">Spritemotion</span>
+        <span class="logo-text">{{ t('app.name') }}</span>
       </div>
 
       <!-- Project Tabs Strip -->
@@ -800,17 +907,24 @@
     <div class="topbar-right">
       <button
         :if="hasActiveProject"
+        id="btn-menu-export"
+        class="topbar-btn"
+        :title="t('app.export_title')"
+        @click="exportCurrentProject()"
+      >{{ t('app.export') }}</button>
+      <button
+        :if="hasActiveProject"
         id="btn-menu-save"
         class="topbar-btn primary"
-        title="Save Project to WASMFS"
-        @click="saveCurrentProject()"
+        :title="t('app.save_title')"
+        @click="flushSave()"
       >{{ currentSaveText }}</button>
       <button
         :if="isInstallable"
         id="pwa-install-btn"
         class="pwa-install-btn"
         @click="handleInstall()"
-      >⬇ Install App</button>
+      >{{ t('app.install') }}</button>
     </div>
   </div>
 

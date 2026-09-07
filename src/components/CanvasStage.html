@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   canvasService,
   onPaintStroke,
   onSetPivot,
@@ -8,43 +9,12 @@
   onMovePixel,
   onZoomChange
 }" type="text/typescript">
-  const getTouchDistance = (t1: Touch, t2: Touch): number => {
-    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-  };
-
-  const getTouchMidpoint = (t1: Touch, t2: Touch): { x: number; y: number } => {
-    return {
-      x: (t1.clientX + t2.clientX) / 2,
-      y: (t1.clientY + t2.clientY) / 2,
-    };
-  };
-
-  const getLinePixels = (x0: number, y0: number, x1: number, y1: number): Array<{ x: number; y: number }> => {
-    const pixels: Array<{ x: number; y: number }> = [];
-    const dx = Math.abs(x1 - x0);
-    const dy = Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1;
-    const sy = y0 < y1 ? 1 : -1;
-    let err = dx - dy;
-    let cx = x0;
-    let cy = y0;
-    while (true) {
-      pixels.push({ x: cx, y: cy });
-      if (cx === x1 && cy === y1) break;
-      const e2 = 2 * err;
-      if (e2 > -dy) {
-        err -= dy;
-        cx += sx;
-      }
-      if (e2 < dx) {
-        err += dx;
-        cy += sy;
-      }
-    }
-    return pixels;
-  };
+  const { getLinePixels, getTouchDistance, getTouchMidpoint } = await import('../helpers/canvas.helper');
 
   let curZoom = canvasService.getZoom();
+
+  // Assigned once the stage is mounted; releases every window listener it registered.
+  let dispose: () => void = () => {};
 
   canvasService.onZoom((z: number) => {
     curZoom = z;
@@ -58,7 +28,11 @@
   const ctx = canvas ? canvas.getContext('2d') : null;
 
   if (root && canvas && ctx) {
-    // Modifier keys state
+    // Listeners registered on window are torn down together when the stage goes away.
+    const teardown = new AbortController();
+    const listen = { signal: teardown.signal };
+
+    // Modifier key state
     let isShiftHeld = false;
     let isCtrlHeld = false;
     let isCmdHeld = false;
@@ -88,8 +62,33 @@
     let initialTouchZoom = 6;
     let lastTouchMidpoint: { x: number; y: number } | null = null;
 
-    const triggerRedraw = () => {
-      canvasService.redraw(ctx, canvas.width, canvas.height, {
+    // Viewport geometry, cached so pointer handling never forces a layout.
+    let viewRect = canvas.getBoundingClientRect();
+    let cssWidth = viewRect.width;
+    let cssHeight = viewRect.height;
+    let appliedCursor = '';
+
+    const refreshViewRect = () => {
+      viewRect = canvas.getBoundingClientRect();
+    };
+
+    const resizeSurface = (width: number, height: number) => {
+      const dpr = window.devicePixelRatio || 1;
+      const deviceWidth = Math.max(1, Math.round(width * dpr));
+      const deviceHeight = Math.max(1, Math.round(height * dpr));
+      cssWidth = width;
+      cssHeight = height;
+      if (canvas.width !== deviceWidth || canvas.height !== deviceHeight) {
+        canvas.width = deviceWidth;
+        canvas.height = deviceHeight;
+      }
+      // One scale for the whole surface: every draw call below works in CSS pixels.
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      refreshViewRect();
+    };
+
+    const paint = () => {
+      canvasService.redraw(ctx, cssWidth, cssHeight, {
         isShiftHeld,
         isCtrlHeld,
         isCmdHeld,
@@ -98,57 +97,76 @@
       });
     };
 
-    canvasService.subscribe(() => {
-      triggerRedraw();
-    });
+    // The service coalesces every change into a single repaint per animation frame.
+    canvasService.subscribe(paint);
+
+    const requestPaint = () => canvasService.notify();
 
     const updateCursor = () => {
+      let next = 'crosshair';
       if (isMovingLayer || isShiftHeld) {
-        root.style.cursor = isMovingLayer ? 'grabbing' : 'move';
-        return;
-      }
-      if (isDraggingLoosePixel) {
-        root.style.cursor = 'grabbing';
-        return;
-      }
-      if (isCtrlHeld) {
+        next = isMovingLayer ? 'grabbing' : 'move';
+      } else if (isDraggingLoosePixel) {
+        next = 'grabbing';
+      } else if (isCtrlHeld) {
         const hover = canvasService.getHoverPixel();
         const framePixels = canvasService.getFramePixels();
-        if (hover && framePixels[`${hover.x},${hover.y}`]) {
-          root.style.cursor = 'grab';
-        } else {
-          root.style.cursor = 'default';
-        }
-        return;
+        next = hover && framePixels[`${hover.x},${hover.y}`] ? 'grab' : 'default';
+      } else if (isSpaceHeld || isMousePanning) {
+        next = isMousePanning ? 'grabbing' : 'grab';
+      } else if (canvasService.isPivotMode()) {
+        next = 'pointer';
       }
-      if (isSpaceHeld || isMousePanning) {
-        root.style.cursor = isMousePanning ? 'grabbing' : 'grab';
-        return;
+      if (next !== appliedCursor) {
+        appliedCursor = next;
+        root.style.cursor = next;
       }
-      if (canvasService.isPivotMode()) {
-        root.style.cursor = 'pointer';
-        return;
-      }
-      root.style.cursor = 'crosshair';
     };
 
     const handleResetView = () => {
-      const rect = canvas.getBoundingClientRect();
-      canvasService.resetView(rect.width, rect.height);
+      canvasService.resetView(cssWidth, cssHeight);
     };
 
-    // ResizeObserver for responsive full canvas resolution matching 1:1 CSS pixels
+    const paintPixelAt = (x: number, y: number) => {
+      currentStrokePixels.push({ x, y });
+      canvasService.paintPixel(x, y, currentPaintColor === '__eraser__' ? null : currentPaintColor);
+    };
+
+    const paintLineTo = (pixel: { x: number; y: number }) => {
+      const points = lastPaintedPixel
+        ? getLinePixels(lastPaintedPixel.x, lastPaintedPixel.y, pixel.x, pixel.y)
+        : [pixel];
+      for (const point of points) {
+        paintPixelAt(point.x, point.y);
+      }
+      lastPaintedPixel = pixel;
+    };
+
+    const commitStroke = () => {
+      if (!isPainting) return;
+      isPainting = false;
+      if (currentStrokePixels.length > 0) {
+        onPaintStroke?.(currentStrokePixels, currentPaintColor);
+        currentStrokePixels = [];
+      }
+      lastPaintedPixel = null;
+    };
+
+    // Match the backing store to the element size, at device resolution.
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          canvas.width = Math.round(width);
-          canvas.height = Math.round(height);
-          triggerRedraw();
+          resizeSurface(width, height);
+          requestPaint();
         }
       }
     });
     resizeObserver.observe(root);
+    resizeSurface(viewRect.width || root.clientWidth, viewRect.height || root.clientHeight);
+
+    window.addEventListener('resize', refreshViewRect, listen);
+    window.addEventListener('scroll', refreshViewRect, { passive: true, capture: true, signal: teardown.signal });
 
     // Keyboard modifiers
     window.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -177,9 +195,9 @@
       }
       if (changed) {
         updateCursor();
-        triggerRedraw();
+        requestPaint();
       }
-    });
+    }, listen);
 
     window.addEventListener('keyup', (e: KeyboardEvent) => {
       let changed = false;
@@ -205,9 +223,9 @@
       }
       if (changed) {
         updateCursor();
-        triggerRedraw();
+        requestPaint();
       }
-    });
+    }, listen);
 
     window.addEventListener('blur', () => {
       isShiftHeld = false;
@@ -219,13 +237,14 @@
       isSpaceHeld = false;
       isDraggingLoosePixel = false;
       updateCursor();
-      triggerRedraw();
-    });
+      requestPaint();
+    }, listen);
 
     // Touch handlers
     root.addEventListener(
       'touchstart',
       (e: TouchEvent) => {
+        refreshViewRect();
         if (e.touches.length === 2) {
           e.preventDefault();
           isTwoFingerGesture = true;
@@ -234,25 +253,17 @@
           initialTouchZoom = canvasService.getZoom();
           lastTouchMidpoint = getTouchMidpoint(e.touches[0], e.touches[1]);
         } else if (e.touches.length === 1 && !isTwoFingerGesture) {
-          const rect = canvas.getBoundingClientRect();
-          const pixel = canvasService.getSpritePixelAtPointer(e.touches[0].clientX, e.touches[0].clientY, rect, canvas.width, canvas.height);
+          const pixel = canvasService.getSpritePixelAtPointer(e.touches[0].clientX, e.touches[0].clientY, viewRect);
           if (pixel) {
             isPainting = true;
             lastPaintedPixel = pixel;
-            currentStrokePixels = [pixel];
-            const colors = canvasService.getColors();
-            currentPaintColor = colors.primary;
-            const framePixels = canvasService.getFramePixels();
-            if (currentPaintColor === '__eraser__') {
-              delete framePixels[`${pixel.x},${pixel.y}`];
-            } else {
-              framePixels[`${pixel.x},${pixel.y}`] = currentPaintColor;
-            }
-            triggerRedraw();
+            currentStrokePixels = [];
+            currentPaintColor = canvasService.getColors().primary;
+            paintPixelAt(pixel.x, pixel.y);
           }
         }
       },
-      { passive: false }
+      { passive: false, signal: teardown.signal }
     );
 
     root.addEventListener(
@@ -262,83 +273,58 @@
           e.preventDefault();
           const currentDist = getTouchDistance(e.touches[0], e.touches[1]);
           if (initialTouchDistance > 0) {
-            const scale = currentDist / initialTouchDistance;
-            canvasService.setZoom(initialTouchZoom * scale);
+            canvasService.setZoom(initialTouchZoom * (currentDist / initialTouchDistance));
           }
 
           const currentMid = getTouchMidpoint(e.touches[0], e.touches[1]);
           if (lastTouchMidpoint) {
-            const dx = currentMid.x - lastTouchMidpoint.x;
-            const dy = currentMid.y - lastTouchMidpoint.y;
-            canvasService.pan(dx, dy);
+            canvasService.pan(currentMid.x - lastTouchMidpoint.x, currentMid.y - lastTouchMidpoint.y);
           }
           lastTouchMidpoint = currentMid;
-          triggerRedraw();
         } else if (isPainting && e.touches.length === 1) {
           e.preventDefault();
-          const rect = canvas.getBoundingClientRect();
-          const pixel = canvasService.getSpritePixelAtPointer(e.touches[0].clientX, e.touches[0].clientY, rect, canvas.width, canvas.height);
+          const pixel = canvasService.getSpritePixelAtPointer(e.touches[0].clientX, e.touches[0].clientY, viewRect);
           if (pixel) {
-            const points = lastPaintedPixel
-              ? getLinePixels(lastPaintedPixel.x, lastPaintedPixel.y, pixel.x, pixel.y)
-              : [pixel];
-            const framePixels = canvasService.getFramePixels();
-            for (const pt of points) {
-              currentStrokePixels.push(pt);
-              if (currentPaintColor === '__eraser__') {
-                delete framePixels[`${pt.x},${pt.y}`];
-              } else {
-                framePixels[`${pt.x},${pt.y}`] = currentPaintColor;
-              }
-            }
-            lastPaintedPixel = pixel;
-            triggerRedraw();
+            paintLineTo(pixel);
           }
         }
       },
-      { passive: false }
+      { passive: false, signal: teardown.signal }
     );
 
     const endTouch = () => {
-      if (isPainting) {
-        isPainting = false;
-        if (currentStrokePixels.length > 0) {
-          onPaintStroke?.(currentStrokePixels, currentPaintColor);
-          currentStrokePixels = [];
-        }
-        lastPaintedPixel = null;
-      }
+      commitStroke();
       isTwoFingerGesture = false;
       lastTouchMidpoint = null;
     };
-    root.addEventListener('touchend', endTouch);
-    root.addEventListener('touchcancel', endTouch);
+    root.addEventListener('touchend', endTouch, listen);
+    root.addEventListener('touchcancel', endTouch, listen);
 
-    // Wheel zooming / panning
+    // Wheel: scroll pans, Ctrl/Cmd + scroll zooms around the pointer.
     root.addEventListener(
       'wheel',
       (e: WheelEvent) => {
         e.preventDefault();
-        const rect = canvas.getBoundingClientRect();
         if (e.ctrlKey || e.metaKey) {
-          const zoomDelta = -e.deltaY * 0.02;
-          canvasService.zoomAtPoint(Math.exp(zoomDelta), e.clientX, e.clientY, rect, canvas.width, canvas.height);
+          refreshViewRect();
+          canvasService.zoomAtPoint(Math.exp(-e.deltaY * 0.02), e.clientX, e.clientY, viewRect);
         } else {
           canvasService.pan(-e.deltaX, -e.deltaY);
         }
       },
-      { passive: false }
+      { passive: false, signal: teardown.signal }
     );
 
     // Mouse interactions
     root.addEventListener('mousedown', (e: MouseEvent) => {
+      refreshViewRect();
       isMouseDown = true;
       isShiftHeld = e.shiftKey;
       isCtrlHeld = e.ctrlKey;
       isCmdHeld = e.metaKey;
       isAltHeld = e.altKey;
 
-      // 1. SHIFT: arrastra el contenido de la capa
+      // 1. SHIFT: drag the layer contents
       if (isShiftHeld && e.button === 0) {
         e.preventDefault();
         isMovingLayer = true;
@@ -346,11 +332,11 @@
         layerDragTotalDisplacement = { x: 0, y: 0 };
         updateCursor();
         onStartTranslateLayer?.();
-        triggerRedraw();
+        requestPaint();
         return;
       }
 
-      // 2. Space or Middle-click: Pan canvas
+      // 2. Space or middle click: pan the canvas
       if (isSpaceHeld || e.button === 1) {
         e.preventDefault();
         isMousePanning = true;
@@ -359,30 +345,23 @@
         return;
       }
 
-      // 3. CTRL: arrastra pixeles sueltos
+      // 3. CTRL: drag a single loose pixel
       if (isCtrlHeld && e.button === 0) {
-        const rect = canvas.getBoundingClientRect();
-        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect, canvas.width, canvas.height);
-        if (pixel) {
-          const framePixels = canvasService.getFramePixels();
-          const color = framePixels[`${pixel.x},${pixel.y}`];
-          if (color) {
-            e.preventDefault();
-            isDraggingLoosePixel = true;
-            draggedPixelStart = { x: pixel.x, y: pixel.y };
-            draggedPixelCurrent = { x: pixel.x, y: pixel.y };
-            updateCursor();
-            onStartMovePixel?.(pixel.x, pixel.y);
-            return;
-          }
+        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect);
+        if (pixel && canvasService.getFramePixels()[`${pixel.x},${pixel.y}`]) {
+          e.preventDefault();
+          isDraggingLoosePixel = true;
+          draggedPixelStart = { x: pixel.x, y: pixel.y };
+          draggedPixelCurrent = { x: pixel.x, y: pixel.y };
+          updateCursor();
+          onStartMovePixel?.(pixel.x, pixel.y);
+          return;
         }
       }
 
-      const rect = canvas.getBoundingClientRect();
-
       if (canvasService.isPivotMode() && e.button === 0) {
         e.preventDefault();
-        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect, canvas.width, canvas.height);
+        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect);
         if (pixel) {
           canvasService.setPivot({ x: pixel.x, y: pixel.y });
           onSetPivot?.(pixel.x, pixel.y);
@@ -392,25 +371,17 @@
 
       if (e.button === 0 || e.button === 2) {
         e.preventDefault();
-        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect, canvas.width, canvas.height);
+        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect);
         if (pixel) {
           isPainting = true;
           const colors = canvasService.getColors();
-          const isRightClick = e.button === 2;
-          currentPaintColor = isRightClick ? colors.secondary : colors.primary;
+          currentPaintColor = e.button === 2 ? colors.secondary : colors.primary;
           lastPaintedPixel = pixel;
-          currentStrokePixels = [pixel];
-
-          const framePixels = canvasService.getFramePixels();
-          if (currentPaintColor === '__eraser__') {
-            delete framePixels[`${pixel.x},${pixel.y}`];
-          } else {
-            framePixels[`${pixel.x},${pixel.y}`] = currentPaintColor;
-          }
-          triggerRedraw();
+          currentStrokePixels = [];
+          paintPixelAt(pixel.x, pixel.y);
         }
       }
-    });
+    }, listen);
 
     window.addEventListener('mousemove', (e: MouseEvent) => {
       isShiftHeld = e.shiftKey;
@@ -433,17 +404,13 @@
       }
 
       if (isMousePanning) {
-        const dx = e.clientX - mousePanStart.x;
-        const dy = e.clientY - mousePanStart.y;
-        canvasService.pan(dx, dy);
+        canvasService.pan(e.clientX - mousePanStart.x, e.clientY - mousePanStart.y);
         mousePanStart = { x: e.clientX, y: e.clientY };
         return;
       }
 
-      const rect = root.getBoundingClientRect();
-
       if (isDraggingLoosePixel) {
-        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect, canvas.width, canvas.height);
+        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect);
         if (pixel && (pixel.x !== draggedPixelCurrent.x || pixel.y !== draggedPixelCurrent.y)) {
           draggedPixelCurrent = { x: pixel.x, y: pixel.y };
           onMovePixel?.(draggedPixelStart.x, draggedPixelStart.y, pixel.x, pixel.y, false);
@@ -452,41 +419,24 @@
       }
 
       if (isPainting) {
-        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect);
-        if (pixel) {
-          if (!lastPaintedPixel || lastPaintedPixel.x !== pixel.x || lastPaintedPixel.y !== pixel.y) {
-            const points = lastPaintedPixel
-              ? getLinePixels(lastPaintedPixel.x, lastPaintedPixel.y, pixel.x, pixel.y)
-              : [pixel];
-            const framePixels = canvasService.getFramePixels();
-            for (const pt of points) {
-              currentStrokePixels.push(pt);
-              if (currentPaintColor === '__eraser__') {
-                delete framePixels[`${pt.x},${pt.y}`];
-              } else {
-                framePixels[`${pt.x},${pt.y}`] = currentPaintColor;
-              }
-            }
-            lastPaintedPixel = pixel;
-            canvasService.setHoverPixel(pixel);
-            triggerRedraw();
-          }
+        const pixel = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect);
+        if (pixel && (!lastPaintedPixel || lastPaintedPixel.x !== pixel.x || lastPaintedPixel.y !== pixel.y)) {
+          paintLineTo(pixel);
+          canvasService.setHoverPixel(pixel);
         }
         return;
       }
 
-      const hover = canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, rect);
-      canvasService.setHoverPixel(hover);
-
+      canvasService.setHoverPixel(canvasService.getSpritePixelAtPointer(e.clientX, e.clientY, viewRect));
       updateCursor();
-    });
+    }, listen);
 
     root.addEventListener('mouseleave', () => {
       if (isMovingLayer) {
         isMovingLayer = false;
         onTranslateLayer?.(0, 0, true);
         updateCursor();
-        triggerRedraw();
+        requestPaint();
       }
       if (isDraggingLoosePixel) {
         isDraggingLoosePixel = false;
@@ -494,15 +444,15 @@
         updateCursor();
       }
       canvasService.setHoverPixel(null);
-    });
+    }, listen);
 
-    window.addEventListener('mouseup', (e: MouseEvent) => {
+    window.addEventListener('mouseup', () => {
       isMouseDown = false;
       if (isMovingLayer) {
         isMovingLayer = false;
         onTranslateLayer?.(0, 0, true);
         updateCursor();
-        triggerRedraw();
+        requestPaint();
       }
 
       if (isMousePanning) {
@@ -514,33 +464,32 @@
         onMovePixel?.(draggedPixelStart.x, draggedPixelStart.y, draggedPixelCurrent.x, draggedPixelCurrent.y, true);
       }
 
-      if (isPainting) {
-        isPainting = false;
-        if (currentStrokePixels.length > 0) {
-          onPaintStroke?.(currentStrokePixels, currentPaintColor);
-          currentStrokePixels = [];
-        }
-        lastPaintedPixel = null;
-      }
-
+      commitStroke();
       updateCursor();
-    });
+    }, listen);
 
     root.addEventListener('contextmenu', (e: MouseEvent) => {
       e.preventDefault();
-    });
+    }, listen);
 
     root.addEventListener('dblclick', () => {
       handleResetView();
-    });
+    }, listen);
 
     const resetBtn = root.querySelector('.btn-reset-view');
     if (resetBtn) {
       resetBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         handleResetView();
-      });
+      }, listen);
     }
+
+    // Exposed on the component store so a host that unmounts the stage can release
+    // every window listener it registered.
+    dispose = () => {
+      teardown.abort();
+      resizeObserver.disconnect();
+    };
   }
 </script>
 
@@ -550,8 +499,8 @@
   <div class="canvas-hud-overlay">
     <div class="hud-left">
       <span class="hud-zoom-badge">{{ Math.round(curZoom) }}x</span>
-      <button class="btn-hud-tool btn-reset-view" title="Recenter View (Double Tap/Click)">🎯 Reset</button>
+      <button class="btn-hud-tool btn-reset-view" :title="t('canvas.reset_title')">{{ t('canvas.reset') }}</button>
     </div>
-    <div class="hud-hint">SHIFT: Arrastrar Capa • CTRL: Arrastrar Píxel • Espacio: Desplazar Canvas • Rueda: Zoom</div>
+    <div class="hud-hint">{{ t('canvas.hint') }}</div>
   </div>
 </div>

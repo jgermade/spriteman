@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   currentFrame,
   totalFrames,
   isPlaying,
@@ -6,6 +7,7 @@
   spriteWidth,
   spriteHeight,
   framePixels,
+  frameRevisions,
   animations,
   activeAnimationId,
   layerGroups,
@@ -42,11 +44,18 @@
   let thumbCanvas: HTMLCanvasElement | null = null;
   const thumbCache = new Map<string, string>();
 
-  const getThumbnail = (i: number, pixelsMap: any, w: number, h: number): string => {
+  /**
+   * Thumbnails are cached by the frame's content revision, which the project service
+   * bumps whenever that frame changes. The previous key (pixel count + first color)
+   * missed edits that repainted a pixel without changing the count.
+   */
+  const getThumbnail = (i: number, pixelsMap: any, w: number, h: number, revision: number): string => {
+    const key = `${i}_${w || 64}x${h || 64}_r${revision}`;
+    const cached = thumbCache.get(key);
+    if (cached !== undefined) return cached;
+
     const pixels = (pixelsMap && pixelsMap[i]) || {};
     const keys = Object.keys(pixels);
-    const key = `${i}_${w || 64}x${h || 64}_${keys.length}_${keys[0] ? pixels[keys[0]] : ''}`;
-    if (thumbCache.has(key)) return thumbCache.get(key)!;
 
     if (!thumbCanvas) {
       thumbCanvas = document.createElement('canvas');
@@ -76,7 +85,8 @@
     }
 
     const dataUrl = thumbCanvas.toDataURL();
-    if (thumbCache.size > 250) thumbCache.clear();
+    // Keep the cache bounded; stale revisions are never looked up again.
+    if (thumbCache.size > 512) thumbCache.clear();
     thumbCache.set(key, dataUrl);
     return dataUrl;
   };
@@ -88,7 +98,7 @@
   $: hasRangeSelection = !!selectedRange && selectedRange.end > selectedRange.start;
   $: rangeStart = selectedRange ? selectedRange.start : 0;
   $: rangeEnd = selectedRange ? selectedRange.end : 0;
-  $: frameIndicatorText = `Frame: ${activeInt + 1} / ${maxFrames}`;
+  $: frameIndicatorText = t('timeline.frame_indicator', { current: activeInt + 1, total: maxFrames });
 
   const getAnimIcon = (name: string): string => {
     const lower = (name || '').toLowerCase();
@@ -105,7 +115,7 @@
   };
 
   const handleRenameAnim = (a: any) => {
-    const newName = prompt('Renombrar animación:', a.name || '');
+    const newName = prompt(t('timeline.rename_animation_prompt'), a.name || '');
     if (newName && newName.trim() && a.id) {
       onRenameAnimation?.(a.id, newName.trim());
     }
@@ -126,7 +136,6 @@
 
   // Build reactive reel items
   const buildCellData = (i: number, cellGroup: any, isIntermediate: boolean) => {
-    const isActive = i === activeInt;
     const isInRange = hasRangeSelection && i >= rangeStart && i <= rangeEnd;
     const inGroup = !!cellGroup;
     const isGroupStart = inGroup && i === cellGroup.start_frame;
@@ -136,7 +145,6 @@
 
     return {
       index: i,
-      isActive,
       isInRange,
       inGroup,
       isGroupStart,
@@ -144,12 +152,24 @@
       isIntermediate,
       hasGroupPivot,
       pivotCoords,
-      thumb: getThumbnail(i, framePixels, spriteWidth, spriteHeight),
+      thumb: getThumbnail(i, framePixels, spriteWidth, spriteHeight, (frameRevisions || [])[i] || 0),
       title: isIntermediate
-        ? `Fotograma ${i + 1} (Intermedio automático de ${cellGroup?.name || 'Grupo'}, no editable)`
+        ? t('timeline.cell_intermediate_title', {
+            number: i + 1,
+            group: cellGroup?.name || t('timeline.group_default_name'),
+          })
+        : inGroup && hasGroupPivot
+        ? t('timeline.cell_in_group_pivot_title', {
+            number: i + 1,
+            group: cellGroup?.name || t('timeline.group_default_name'),
+            coords: pivotCoords,
+          })
         : inGroup
-        ? `Frame ${i + 1} (${cellGroup?.name || 'Grupo'}${hasGroupPivot ? ` • Pivote: ${pivotCoords}` : ''})`
-        : `Frame ${i + 1} (Shift+Click to select range, Drag to reorder)`
+        ? t('timeline.cell_in_group_title', {
+            number: i + 1,
+            group: cellGroup?.name || t('timeline.group_default_name'),
+          })
+        : t('timeline.cell_title', { number: i + 1 })
     };
   };
 
@@ -292,20 +312,20 @@
         :key="a.id"
         class="btn-anim-tab"
         :class="{ active: a.id === activeAnimationId }"
-        :title="`${a.name} (${a.total_frames} frames)`"
+        :title="t('timeline.animation_tab_title', { name: a.name, frames: a.total_frames })"
         @click="handleSelectAnim(a.id)"
         @dblclick="handleRenameAnim(a)"
       >
         <span class="anim-tab-icon">{{ getAnimIcon(a.name) }}</span>
         <span class="anim-tab-name">{{ a.name }}</span>
-        <span class="anim-tab-badge">{{ a.total_frames }}f</span>
+        <span class="anim-tab-badge">{{ t('timeline.animation_badge', { frames: a.total_frames }) }}</span>
       </button>
     </div>
     <button
       class="btn-anim-tab-new"
-      title="Crear nueva secuencia de animación para este personaje"
+      :title="t('timeline.new_animation_title')"
       @click="onAddAnimation?.()"
-    >+ Nueva Animación</button>
+    >{{ t('timeline.new_animation') }}</button>
   </div>
 
   <!-- Timeline Controls Toolbar -->
@@ -314,14 +334,14 @@
       <button
         class="btn-tool btn-play"
         :class="{ active: isPlaying }"
-        title="Play / Pause"
+        :title="t('timeline.play_title')"
         @click="onTogglePlay?.()"
       >
-        <span :if="isPlaying">⏸ Pause</span>
-        <span :else>▶ Play</span>
+        <span :if="isPlaying">{{ t('timeline.pause') }}</span>
+        <span :else>{{ t('timeline.play') }}</span>
       </button>
-      <button class="btn-tool btn-prev" title="Previous Frame" @click="onStep?.(-1)">⏮</button>
-      <button class="btn-tool btn-next" title="Next Frame" @click="onStep?.(1)">⏭</button>
+      <button class="btn-tool btn-prev" :title="t('timeline.prev_title')" @click="onStep?.(-1)">⏮</button>
+      <button class="btn-tool btn-next" :title="t('timeline.next_title')" @click="onStep?.(1)">⏭</button>
     </div>
 
     <div class="history-actions-group">
@@ -329,7 +349,7 @@
         class="btn-tool icon-only btn-undo"
         :class="{ disabled: !canUndo }"
         :disabled="!canUndo"
-        title="Deshacer (Cmd+Z / Ctrl+Z)"
+        :title="t('timeline.undo_title')"
         @click="onUndo?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -341,7 +361,7 @@
         class="btn-tool icon-only btn-redo"
         :class="{ disabled: !canRedo }"
         :disabled="!canRedo"
-        title="Rehacer (Cmd+Shift+Z / Ctrl+Shift+Z)"
+        :title="t('timeline.redo_title')"
         @click="onRedo?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -354,7 +374,7 @@
     <div class="frame-actions-group">
       <button
         class="btn-tool icon-only btn-duplicate"
-        title="Duplicar fotograma actual"
+        :title="t('timeline.duplicate_title')"
         @click="onDuplicateFrame?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -366,7 +386,7 @@
         class="btn-tool icon-only btn-delete"
         :class="{ disabled: (totalFrames || 1) <= 1 }"
         :disabled="(totalFrames || 1) <= 1"
-        title="Eliminar fotograma actual"
+        :title="t('timeline.delete_title')"
         @click="onDeleteFrame?.()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -379,7 +399,7 @@
       <button
         class="btn-tool icon-only btn-onion"
         :class="{ active: onionSkin }"
-        title="Papel cebolla (Onion Skinning)"
+        :title="t('timeline.onion_title')"
         @click="handleToggleOnion()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -391,7 +411,7 @@
       <button
         :if="hasRangeSelection"
         class="btn-tool icon-only btn-group-selection primary"
-        :title="`Agrupar fotogramas seleccionados (${rangeStart + 1}..${rangeEnd + 1}) con pivote e interpolación automática`"
+        :title="t('timeline.group_title', { from: rangeStart + 1, to: rangeEnd + 1 })"
         @click="handleGroupSelection()"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -423,14 +443,14 @@
           :class="{ active: item.isGroupActive }"
           @click="onSelectFrame?.(item.group.start_frame)"
         >
-          <span class="group-pill-name" :title="`${item.group.name || 'Grupo'} (Fotogramas ${item.group.start_frame + 1}..${item.group.end_frame + 1})`">
-            ⚡ {{ item.group.name || 'Grupo' }}
+          <span class="group-pill-name" :title="t('timeline.group_pill_title', { name: item.group.name || t('timeline.group_default_name'), from: item.group.start_frame + 1, to: item.group.end_frame + 1 })">
+            ⚡ {{ item.group.name || t('timeline.group_default_name') }}
           </span>
           <div class="group-pill-actions">
             <button
               class="btn-group-action btn-group-pivot"
               :class="{ active: isPivotMode && item.isGroupActive }"
-              title="Ubicar eje de giro (pivote) en el canvas"
+              :title="t('timeline.group_pivot_title')"
               @click.stop="onToggleGroupPivotMode?.()"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -443,7 +463,7 @@
             </button>
             <button
               class="btn-group-action btn-group-ungroup"
-              title="Desagrupar fotogramas"
+              :title="t('timeline.ungroup_title')"
               @click.stop="onUngroupFrames?.(item.group.id)"
             >
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -459,7 +479,7 @@
             :each="c in item.cells"
             :key="c.index"
             class="frame-cell in-group group-intermediate"
-            :class="{ active: c.isActive, 'in-range-selected': c.isInRange }"
+            :class="{ active: c.index === activeInt, 'in-range-selected': c.isInRange }"
             :title="c.title"
             @click="handleCellClick($event, c.index, true)"
           >
@@ -475,7 +495,7 @@
         :else
         class="frame-cell"
         :class="{
-          active: item.cell.isActive,
+          active: item.cell.index === activeInt,
           'in-range-selected': item.cell.isInRange,
           'in-group': item.cell.inGroup,
           'group-start': item.cell.isGroupStart,
@@ -490,7 +510,7 @@
         @dragover="handleCellDragOver($event, item.cell.index)"
       >
         <span class="cell-num">{{ item.cell.index + 1 }}</span>
-        <span :if="item.cell.hasGroupPivot" class="cell-pivot-dot" :title="`Pivote: ${item.cell.pivotCoords}`">📍</span>
+        <span :if="item.cell.hasGroupPivot" class="cell-pivot-dot" :title="t('timeline.pivot_title', { coords: item.cell.pivotCoords })">📍</span>
         <img class="cell-thumb-canvas" :src="item.cell.thumb" width="44" height="44" alt="Thumb" />
       </button>
     </div>
@@ -503,7 +523,7 @@
       class="frame-cell new"
       :class="{ 'is-dragging': isDraggingNew }"
       draggable="true"
-      title="Click to append frame, or drag to insert between existing frames"
+      :title="t('timeline.add_frame_title')"
       @click="onAddFrame?.()"
       @dragstart="handleNewDragStart($event)"
       @dragend="cleanupDrag()"

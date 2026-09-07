@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   layers,
   selectedLayerId,
   isPivotMode,
@@ -20,7 +21,7 @@
   let dropMode: 'before' | 'after' | 'child' | null = null;
 
   $: validLayers = (layers || []).filter((l: any) => l && typeof l === 'object');
-  $: layerCountText = `${validLayers.length} Layers`;
+  $: layerCountText = t('layers.count', { count: validLayers.length });
 
   const handleSelect = (id: string) => {
     if (draggingId) return;
@@ -155,7 +156,7 @@
 
 <div class="hierarchy-panel">
   <div class="panel-header">
-    <span class="panel-title">Layer Hierarchy</span>
+    <span class="panel-title">{{ t('layers.title') }}</span>
     <span class="badge">{{ layerCountText }}</span>
   </div>
 
@@ -168,14 +169,14 @@
         'drop-before': dropTargetId === layer.id && dropMode === 'before',
         'drop-after': dropTargetId === layer.id && dropMode === 'after',
         'drop-child': dropTargetId === layer.id && dropMode === 'child'
-      }" :draggable="renamingId !== layer.id" title="Arrastra para reordenar capas o anidar como hija"
+      }" :draggable="renamingId !== layer.id" :title="t('layers.drag_title')"
       @click="handleSelect(layer.id)" @dragstart="handleDragStart($event, layer)" @dragend="handleDragEnd()"
       @dragover="handleDragOver($event, layer)" @dragleave="handleDragLeave($event, layer)"
       @drop="handleDrop($event, layer)">
       <div class="layer-title-group">
         <button class="btn-layer-action btn-layer-visibility"
           :class="{ 'is-visible': layer.visible !== false, 'is-hidden': layer.visible === false }"
-          :title="layer.visible !== false ? 'Ocultar capa' : 'Mostrar capa'"
+          :title="layer.visible !== false ? t('layers.hide_title') : t('layers.show_title')"
           @click.stop="onToggleLayerVisibility?.(layer.id)">
           <svg :if="layer.visible !== false" width="13" height="13" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,11 +192,11 @@
           </svg>
         </button>
 
-        <span class="layer-drag-handle" title="Arrastrar para reordenar">⋮⋮</span>
+        <span class="layer-drag-handle" :title="t('layers.drag_handle_title')">⋮⋮</span>
 
         <span class="layer-name-container">
           <span :if="!!layer.parent_id" class="layer-child-arrow">↳</span>
-          <span :if="renamingId !== layer.id" class="layer-name" title="Doble clic para renombrar"
+          <span :if="renamingId !== layer.id" class="layer-name" :title="t('layers.rename_title')"
             @dblclick.stop="startRename(layer)">{{ layer.name }}</span>
           <input :else type="text" class="layer-rename-input" :value="renamingName"
             @input="renamingName = $event.target.value" @blur="commitRename(layer)"
@@ -224,14 +225,14 @@
           </svg>
         </button>
 
-        <button class="btn-layer-action btn-layer-move-up" title="Mover capa arriba (subir z-index)"
+        <button class="btn-layer-action btn-layer-move-up" :title="t('layers.move_up_title')"
           @click.stop="onMoveLayerUp?.(layer.id)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="18 15 12 9 6 15"></polyline>
           </svg>
         </button>
 
-        <button class="btn-layer-action btn-layer-move-down" title="Mover capa abajo (bajar z-index)"
+        <button class="btn-layer-action btn-layer-move-down" :title="t('layers.move_down_title')"
           @click.stop="onMoveLayerDown?.(layer.id)">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="6 9 12 15 18 9"></polyline>
@@ -239,7 +240,7 @@
         </button>
 
         <button class="btn-layer-action btn-layer-delete" :class="{ disabled: validLayers.length <= 1 }"
-          :style="validLayers.length <= 1 ? 'opacity: 0.3; cursor: not-allowed;' : ''" title="Borrar capa"
+          :style="validLayers.length <= 1 ? 'opacity: 0.3; cursor: not-allowed;' : ''" :title="t('layers.delete_title')"
           @click.stop="handleDelete(layer.id)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
             stroke-linecap="round" stroke-linejoin="round">
@@ -253,9 +254,9 @@
     </div>
 
     <!-- Add Layer placeholder at bottom -->
-    <button class="layer-item new" title="Añadir nueva capa" @click="onAddLayer?.()">
+    <button class="layer-item new" :title="t('layers.add_title')" @click="onAddLayer?.()">
       <span class="layer-new-icon">+</span>
-      <span class="layer-new-text">Añadir Capa</span>
+      <span class="layer-new-text">{{ t('layers.add') }}</span>
     </button>
   </div>
 </div>

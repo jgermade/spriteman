@@ -1,4 +1,5 @@
 <script :setup="{
+  t,
   primaryColor,
   secondaryColor,
   isTempSwapped,
@@ -50,20 +51,20 @@
 
 <div class="palette-panel">
   <div class="panel-header palette-header-dual">
-    <span class="panel-title">Palette</span>
+    <span class="panel-title">{{ t('palette.title') }}</span>
     <div class="dual-color-slots">
-      <div class="color-slot-display" title="Color I (Izquierdo): Clic en cualquier muestra">
-        <span class="slot-tag">I</span>
+      <div class="color-slot-display" :title="t('palette.slot_primary_title')">
+        <span class="slot-tag">{{ t('palette.slot_primary_tag') }}</span>
         <span class="slot-color-preview" :style="getColorPreviewStyle(curPrimary)"></span>
       </div>
       <button
         class="btn-swap-colors"
         :class="{ active: isTempSwapped }"
-        title="Intercambiar colores [X] (o mantener CMD/ALT)"
+        :title="t('palette.swap_title')"
         @click="onSwapColors?.()"
       >⇄</button>
-      <div class="color-slot-display" title="Color D (Derecho): Clic Derecho en cualquier muestra">
-        <span class="slot-tag">D</span>
+      <div class="color-slot-display" :title="t('palette.slot_secondary_title')">
+        <span class="slot-tag">{{ t('palette.slot_secondary_tag') }}</span>
         <span class="slot-color-preview" :style="getColorPreviewStyle(curSecondary)"></span>
       </div>
     </div>
@@ -76,7 +77,7 @@
         'selected-primary': isEraserPrimary(),
         'selected-secondary': isEraserSecondary()
       }"
-      title="Borrador — Borra píxeles&#10;• Clic Izq: Color I&#10;• Clic Der: Color D"
+      :title="t('palette.eraser_title')"
       @click="handleClick($event, '__eraser__')"
       @contextmenu="handleContextMenu($event, '__eraser__')"
     >
@@ -84,9 +85,9 @@
         <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L14.6 1.6c.8-.8 2-.8 2.8 0L21 5.2c.8.8.8 2 0 2.8L11 18"></path>
         <line x1="18" y1="13" x2="11" y2="20"></line>
       </svg>
-      <span :if="isEraserPrimary() && isEraserSecondary()" class="swatch-badge dual">I|D</span>
-      <span :elseif="isEraserPrimary()" class="swatch-badge primary">I</span>
-      <span :elseif="isEraserSecondary()" class="swatch-badge secondary">D</span>
+      <span :if="isEraserPrimary() && isEraserSecondary()" class="swatch-badge dual">{{ t('palette.slot_dual_tag') }}</span>
+      <span :elseif="isEraserPrimary()" class="swatch-badge primary">{{ t('palette.slot_primary_tag') }}</span>
+      <span :elseif="isEraserSecondary()" class="swatch-badge secondary">{{ t('palette.slot_secondary_tag') }}</span>
     </button>
 
     <!-- Colors -->
@@ -103,9 +104,9 @@
       @click="handleClick($event, color)"
       @contextmenu="handleContextMenu($event, color)"
     >
-      <span :if="isPrimary(color) && isSecondary(color)" class="swatch-badge dual">I|D</span>
-      <span :elseif="isPrimary(color)" class="swatch-badge primary">I</span>
-      <span :elseif="isSecondary(color)" class="swatch-badge secondary">D</span>
+      <span :if="isPrimary(color) && isSecondary(color)" class="swatch-badge dual">{{ t('palette.slot_dual_tag') }}</span>
+      <span :elseif="isPrimary(color)" class="swatch-badge primary">{{ t('palette.slot_primary_tag') }}</span>
+      <span :elseif="isSecondary(color)" class="swatch-badge secondary">{{ t('palette.slot_secondary_tag') }}</span>
     </button>
   </div>
   <div class="palette-hint-text">Clic Izq: Color I • Clic Der: Color D • CMD/ALT: Intercambio Temp • [X]: Intercambiar</div>

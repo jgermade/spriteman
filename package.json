@@ -8,12 +8,18 @@
     "build:wasm": "wasm-pack build engine --target web --out-dir ../src/wasm/pkg",
     "build:web": "vite build",
     "build": "npm run build:wasm && npm run build:web",
-    "test": "cargo test"
+    "typecheck": "tsc --noEmit",
+    "test:web": "vitest run",
+    "test": "npm run typecheck && npm run test:web && cargo test"
   },
   "dependencies": {
     "jq79": "^0.7.2"
   },
   "devDependencies": {
-    "vite": "^6.2.0"
+    "@types/node": "^26.4.1",
+    "jsdom": "^30.0.1",
+    "typescript": "^7.0.2",
+    "vite": "^6.2.0",
+    "vitest": "^5.0.0"
   }
 }

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spritemotion — Performance Remediation Gantt (2026-09-07)</title>
+  <style>
+    :root {
+      --bg: #0f141c;
+      --card-bg: #18202c;
+      --card-border: #263344;
+      --text: #e2e8f0;
+      --text-muted: #8b9bb4;
+      --primary: #38bdf8;
+      --accent: #818cf8;
+      --done: #34d399;
+      --p1: #f87171;
+      --p2: #fb923c;
+      --p3: #38bdf8;
+      --p4: #818cf8;
+      --p5: #fbbf24;
+      --grid-line: #1f2937;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 2rem 1.5rem 4rem;
+      min-height: 100vh;
+    }
+
+    header, .container, .notes { max-width: 1200px; margin-left: auto; margin-right: auto; }
+
+    header {
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 1rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle { font-size: 0.95rem; color: var(--text-muted); margin-top: 0.35rem; }
+
+    .legend { display: flex; gap: 1.1rem; align-items: center; font-size: 0.82rem; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 0.45rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.done { background: var(--done); }
+    .dot.p1 { background: var(--p1); }
+    .dot.p2 { background: var(--p2); }
+    .dot.p3 { background: var(--p3); }
+    .dot.p4 { background: var(--p4); }
+    .dot.p5 { background: var(--p5); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      max-width: 1200px;
+      margin: 0 auto 2rem;
+    }
+
+    .metric {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+    }
+
+    .metric .value { font-size: 1.5rem; font-weight: 700; color: var(--p1); font-variant-numeric: tabular-nums; }
+    .metric .label { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; line-height: 1.45; }
+
+    .container {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .gantt-header, .gantt-row { display: grid; grid-template-columns: 340px 1fr; }
+
+    .gantt-header {
+      border-bottom: 1px solid var(--card-border);
+      background: #131924;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .gantt-header-label { padding: 0.9rem 1.25rem; border-right: 1px solid var(--card-border); }
+
+    .timeline-ticks { display: grid; grid-template-columns: repeat(6, 1fr); text-align: center; padding: 0.9rem 0; }
+    .tick { border-right: 1px dashed var(--grid-line); font-size: 0.72rem; }
+    .tick:last-child { border-right: none; }
+
+    .gantt-row { border-bottom: 1px solid var(--card-border); align-items: center; }
+    .gantt-row:last-child { border-bottom: none; }
+    .gantt-row:hover { background: #1b2432; }
+
+    .phase-row { background: #131924; }
+    .phase-row .task-name { color: var(--primary); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; }
+
+    .task-info { padding: 0.85rem 1.25rem; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; gap: 0.2rem; }
+    .task-name { font-size: 0.88rem; font-weight: 600; color: #f1f5f9; }
+    .task-meta { font-size: 0.73rem; color: var(--text-muted); line-height: 1.4; }
+
+    .timeline-track { position: relative; min-height: 46px; display: flex; align-items: center; padding: 0 0.75rem; }
+    .grid-overlay { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(6, 1fr); pointer-events: none; }
+    .grid-col { border-right: 1px dashed var(--grid-line); }
+    .grid-col:last-child { border-right: none; }
+
+    .bar {
+      position: relative;
+      z-index: 2;
+      height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding: 0 0.6rem;
+      font-size: 0.73rem;
+      font-weight: 700;
+      white-space: nowrap;
+      color: #0b111a;
+    }
+
+    .bar.done { background: linear-gradient(135deg, #34d399, #10b981); }
+    .bar.p1 { background: linear-gradient(135deg, #f87171, #ef4444); }
+    .bar.p2 { background: linear-gradient(135deg, #fb923c, #f97316); }
+    .bar.p3 { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }
+    .bar.p4 { background: linear-gradient(135deg, #818cf8, #6366f1); }
+    .bar.p5 { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+
+    .notes { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+    .note { background: var(--card-bg); border: 1px solid var(--card-border); border-left: 3px solid var(--primary); border-radius: 10px; padding: 1rem 1.15rem; }
+    .note h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary); margin-bottom: 0.6rem; }
+    .note ul { margin-left: 1.05rem; }
+    .note li { font-size: 0.82rem; color: var(--text-muted); line-height: 1.65; }
+
+    @media (max-width: 720px) {
+      .gantt-header, .gantt-row { grid-template-columns: 200px 1fr; }
+      .task-info { padding: 0.7rem 0.8rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Performance Remediation Plan</h1>
+      <div class="subtitle">Spritemotion — roadmap snapshot 2026-09-07, derived from the UI performance &amp; project audit</div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="dot done"></span> Shipped</span>
+      <span class="legend-item"><span class="dot p1"></span> P1 Render</span>
+      <span class="legend-item"><span class="dot p2"></span> P2 Document</span>
+      <span class="legend-item"><span class="dot p3"></span> P3 Playback</span>
+      <span class="legend-item"><span class="dot p4"></span> P4 Components</span>
+      <span class="legend-item"><span class="dot p5"></span> P5 Hygiene</span>
+    </div>
+  </header>
+
+  <section class="metrics">
+    <div class="metric"><div class="value">6&times;</div><div class="label">Full canvas repaints to paint <strong>one</strong> pixel (26 280 fillRect calls)</div></div>
+    <div class="metric"><div class="value">10&times;</div><div class="label">Full canvas repaints to advance <strong>one</strong> frame (43 790 fillRect calls)</div></div>
+    <div class="metric"><div class="value">534 ms</div><div class="label">Main-thread block for a single brush stroke; 944 ms for one layer drag</div></div>
+    <div class="metric"><div class="value">2.0 MB</div><div class="label">Re-serialized and rewritten to a ~5 MB localStorage on every edit</div></div>
+  </section>
+
+  <div class="container">
+    <div class="gantt-header">
+      <div class="gantt-header-label">Task</div>
+      <div class="timeline-ticks">
+        <div class="tick">W1</div>
+        <div class="tick">W2</div>
+        <div class="tick">W3</div>
+        <div class="tick">W4</div>
+        <div class="tick">W5</div>
+        <div class="tick">W6</div>
+      </div>
+    </div>
+
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">Done — baseline</span><span class="task-meta">Core, WASM engine, editor shell</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 12%; margin-left: 0;">shipped</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">rAF-coalesced redraw + dirty flags</span><span class="task-meta">canvas.service.ts — one repaint per frame instead of 6–10 per action</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p1" style="width: 15%; margin-left: 0;">P1.1</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Offscreen sprite bitmap blit</span><span class="task-meta">canvas.helper.ts — replace ~2 200 fillRect calls with one drawImage</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p1" style="width: 18%; margin-left: 10%;">P1.2</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Layered canvases + HiDPI backing store</span><span class="task-meta">CanvasStage — static grid/artboard vs dynamic cursor; devicePixelRatio</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p1" style="width: 15%; margin-left: 22%;">P1.3</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Lazy serialization + patch-based undo</span><span class="task-meta">project.service.ts — no JSON.stringify on the edit path</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p2" style="width: 20%; margin-left: 28%;">P2.1</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Skeleton document for WASM</span><span class="task-meta">engine ignores frame_pixels — stop shipping megabytes across the boundary</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p2" style="width: 12%; margin-left: 40%;">P2.2</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">IndexedDB storage + quota handling + export</span><span class="task-meta">storage.service.ts — silent QuotaExceededError today</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p2" style="width: 16%; margin-left: 48%;">P2.3</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Single evaluation per playback tick</span><span class="task-meta">animation.service.ts — cache resolved frames, skip disabled onion skin</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 15%; margin-left: 55%;">P3.1</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Drop the JSON round trip at the WASM boundary</span><span class="task-meta">structured / typed-array transfer of RenderItems</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 14%; margin-left: 65%;">P3.2</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Batched component updates + stable identities</span><span class="task-meta">EditorView — 12 data writes per notification today</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p4" style="width: 14%; margin-left: 62%;">P4.1</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Content-hashed async thumbnails + CSS cleanup</span><span class="task-meta">FrameStrip — stale-cache bug, toDataURL in render, infinite glow, backdrop-filter</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p4" style="width: 15%; margin-left: 72%;">P4.2</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">tsconfig + typecheck + frontend smoke tests</span><span class="task-meta">no type checking exists today; npm test runs cargo only</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p5" style="width: 14%; margin-left: 78%;">P5.1</div>
+      </div>
+    </div>
+
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">PWA build fix, dead code, English-only pass</span><span class="task-meta">sw.js not emitted, manifest hashed into /assets/, mixed languages</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p5" style="width: 14%; margin-left: 86%;">P5.2</div>
+      </div>
+    </div>
+  </div>
+
+  <section class="notes">
+    <div class="note">
+      <h3>How the numbers were taken</h3>
+      <ul>
+        <li>Headless Chromium driving the real dev build, counters on clearRect / fillRect / toDataURL / localStorage.setItem / JSON.stringify.</li>
+        <li>Document under test: 24 frames &times; 3 layers &times; 64&times;64, ~22% fill (~2 226 composite pixels per frame, 2.0 MB JSON).</li>
+        <li>Absolute milliseconds are pessimistic (CPU-only rasterization); the operation counts are hardware independent.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>Open decisions</h3>
+      <ul>
+        <li>Does the exported document keep <code>frame_pixels</code>, or reference a rasterized atlas instead? This drives Phase 2.</li>
+        <li>One shipped UI language — Spanish or English — per AGENTS.md &sect;1.</li>
+        <li>Memory strategy once several project tabs can be open simultaneously.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>Not started (backlog)</h3>
+      <ul>
+        <li>Spritesheet / atlas import (TexturePacker-compatible).</li>
+        <li>Rasterized spritesheet export (<code>raster.rs</code>).</li>
+        <li>Rotation and scale gizmos; easing-curve editing in the timeline.</li>
+      </ul>
+    </div>
+  </section>
+</body>
+</html>

@@ -13,7 +13,7 @@ pub mod model;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-pub use eval::{AnimationEngine, RenderItem, ResolvedFrame};
+pub use eval::{fill_frame_buffer, AnimationEngine, RenderItem, ResolvedFrame, FRAME_ITEM_STRIDE};
 pub use math::{Affine2D, Vec2};
 pub use model::{Easing, Keyframe, Layer, Project, SheetAtlas, SpriteFrame, Transform2D};
 

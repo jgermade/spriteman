@@ -3,18 +3,19 @@
  */
 
 export interface CanvasSizePreset {
-  label: string;
+  /** Message key for the preset's label, resolved through the i18n service. */
+  labelKey: string;
   width: number;
   height: number;
 }
 
 export const STANDARD_PIXEL_SIZES: CanvasSizePreset[] = [
-  { label: '16 × 16 (Mini)', width: 16, height: 16 },
-  { label: '24 × 24 (Tiny)', width: 24, height: 24 },
-  { label: '32 × 32 (Classic)', width: 32, height: 32 },
-  { label: '48 × 48 (Medium)', width: 48, height: 48 },
-  { label: '64 × 64 (Standard)', width: 64, height: 64 },
-  { label: '128 × 128 (Detailed)', width: 128, height: 128 },
+  { labelKey: 'sizes.16x16', width: 16, height: 16 },
+  { labelKey: 'sizes.24x24', width: 24, height: 24 },
+  { labelKey: 'sizes.32x32', width: 32, height: 32 },
+  { labelKey: 'sizes.48x48', width: 48, height: 48 },
+  { labelKey: 'sizes.64x64', width: 64, height: 64 },
+  { labelKey: 'sizes.128x128', width: 128, height: 128 },
 ];
 
 /**
