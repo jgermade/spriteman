@@ -1,0 +1,117 @@
+name: Release
+
+# Validates with the same build the pull requests run, then bumps the version, publishes
+# a GitHub release and deploys the bundle to GitHub Pages.
+#
+# One-time setup: Settings → Pages → Build and deployment → Source: "GitHub Actions".
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Which part of the version to raise
+        type: choice
+        default: patch
+        options: [patch, minor, major]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Nothing is published unless type check, both test suites and the bundle all pass.
+    uses: ./.github/workflows/build.yml
+
+  release:
+    name: Bump version and publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Bump the version
+        id: bump
+        run: |
+          set -euo pipefail
+          npm version "${{ inputs.bump }}" --no-git-tag-version
+          VERSION="$(node -p "require('./package.json').version")"
+
+          # Keep the Rust crate in step with the app; only the [package] version moves,
+          # never a dependency's.
+          awk -v v="$VERSION" '
+            /^\[/ { in_package = ($0 == "[package]") }
+            in_package && /^version[[:space:]]*=/ && !done { sub(/"[^"]*"/, "\"" v "\""); done = 1 }
+            { print }
+          ' engine/Cargo.toml > engine/Cargo.toml.next
+          mv engine/Cargo.toml.next engine/Cargo.toml
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$VERSION"
+
+      - name: Commit and tag
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.bump.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json engine/Cargo.toml
+          git commit -m "chore: release v$VERSION"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "HEAD:${{ github.ref_name }}"
+          git push origin "v$VERSION"
+
+      - name: Download the production bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.bump.outputs.version }}"
+          (cd dist && zip -qr "../spritemotion-$VERSION.zip" .)
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --generate-notes \
+            "spritemotion-$VERSION.zip#Web bundle"
+
+  pages:
+    name: Deploy to GitHub Pages
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+
+      - name: Download the production bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

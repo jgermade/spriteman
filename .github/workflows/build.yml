@@ -1,0 +1,88 @@
+name: Build
+
+# Runs the same checks a contributor runs locally: type check, frontend tests, Rust
+# tests, then the production bundle. Reusable so the release workflow validates the
+# exact same way before it publishes anything.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    outputs:
+      artifact:
+        description: Name of the uploaded production bundle artifact.
+        value: ${{ jobs.build.outputs.artifact }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    outputs:
+      artifact: dist
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Rust ships with the runner image; only the WebAssembly target is missing.
+      - name: Add the WebAssembly target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/wasm-pack
+            engine/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('engine/Cargo.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Install wasm-pack
+        run: |
+          set -euo pipefail
+          if ! command -v wasm-pack >/dev/null; then
+            # Prebuilt binary first; fall back to building it if the download is unavailable.
+            curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh \
+              || cargo install wasm-pack --locked
+          fi
+          wasm-pack --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The TypeScript sources import the generated bindings, so the engine builds first.
+      - name: Build the WebAssembly engine
+        run: npm run build:wasm
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Frontend tests
+        run: npm run test:web
+
+      - name: Rust tests
+        run: cargo test
+
+      - name: Build the web bundle
+        run: npm run build:web
+
+      - name: Upload the production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
