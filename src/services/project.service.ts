@@ -1,4 +1,5 @@
 import { $reactive, $toRaw, ReactiveDeepData } from 'jq79';
+import { decodeCel, encodeCel, EncodedCel } from '../helpers/cel.helper';
 /**
  * Project document state management service.
  */
@@ -25,7 +26,12 @@ export interface AnimationClipData {
   name: string;
   fps: number;
   total_frames: number;
-  frame_pixels: Record<number, Record<string, string>>;
+  /**
+   * The clip's artwork, and the only place it lives: layer id -> frame index -> pixels.
+   * The active clip's cels are mirrored into `layers[].frame_pixels` while it is being
+   * edited, and written back here whenever the clip is left or the document serialized.
+   */
+  cels: Record<string, Record<number, Record<string, string>>>;
   layer_groups?: Record<string, LayerFrameGroup[]>;
 }
 
@@ -84,8 +90,18 @@ type HistoryEntry =
 
 export type PixelMap = Record<string, string>;
 
+/**
+ * Encodings already computed, keyed by the cel they came from. Cels are replaced rather
+ * than mutated, so an unchanged cel keeps its identity and a save re-encodes only what
+ * the user actually touched.
+ */
+const encodedCels = new WeakMap<PixelMap, { width: number; height: number; encoded: EncodedCel | null }>();
+
 /** Shared empty map so an absent frame keeps a stable identity between reads. */
 const EMPTY_PIXELS: PixelMap = {};
+
+/** Format written by this build. v1 documents are migrated when they are opened. */
+export const DOCUMENT_VERSION = '2.0.0';
 
 class ProjectService {
   public readonly state: ReactiveDeepData<ProjectState>;
@@ -109,7 +125,7 @@ class ProjectService {
           name: 'idle',
           fps: 12,
           total_frames: 4,
-          frame_pixels: {},
+          cels: {},
           layer_groups: {},
         },
       ],
@@ -366,7 +382,7 @@ class ProjectService {
   public createNewProject(name: string, width: number, height: number, fps: number = 12): string {
     this.clearHistory();
     const project = {
-      version: '1.0.0',
+      version: DOCUMENT_VERSION,
       meta: {
         name: name.trim() || 'untitled_sprite',
         fps: fps,
@@ -374,13 +390,22 @@ class ProjectService {
         canvas_width: width,
         canvas_height: height,
       },
-      frame_pixels: { 0: {} },
       sheets: [],
       selectedLayerId: 'layer_base',
+      animations: [
+        {
+          id: 'anim_default',
+          name: 'idle',
+          fps,
+          total_frames: 1,
+          layer_groups: {},
+          cels: {},
+        },
+      ],
+      activeAnimationId: 'anim_default',
       layers: [
         {
           id: 'layer_base',
-          frame_pixels: { 0: {} },
           name: 'Base Layer',
           parent_id: null,
           z_index: 0,
@@ -417,15 +442,20 @@ class ProjectService {
       ],
     };
 
-    const json = JSON.stringify(project, null, 2);
+    const json = JSON.stringify(project);
     this.setProjectJson(json);
     return json;
   }
 
+  /**
+   * Loads a document. v2 arrives with per-clip cels; v1 is migrated on the way in, so
+   * existing projects and exported files keep opening.
+   */
   public setProjectJson(json: string): void {
     try {
       const parsed = JSON.parse(json);
       this.state.rawJson = json;
+
       if (parsed.meta) {
         this.state.meta = {
           name: parsed.meta.name ?? 'sprite_anim',
@@ -435,64 +465,28 @@ class ProjectService {
           canvas_height: parsed.meta.canvas_height ?? 64,
         };
       }
+
+      // Read the clips before touching the layers: a v1 migration recovers artwork from
+      // `parsed.layers[].frame_pixels`, and the layers below are the very same objects.
+      const clips = this.isVersion2(parsed) ? this.readClipsV2(parsed) : this.migrateClipsV1(parsed);
+
       this.state.layers = parsed.layers || [];
-      this.state.frame_pixels = parsed.frame_pixels || {};
-
-      // Parse or synthesize animation clips
-      if (parsed.animations && Array.isArray(parsed.animations) && parsed.animations.length > 0) {
-        this.state.animations = parsed.animations;
-        this.state.activeAnimationId = parsed.activeAnimationId || parsed.animations[0].id;
-        const activeClip = this.state.animations.find((a) => a.id === this.state.activeAnimationId) || this.state.animations[0];
-        this.state.frame_pixels = activeClip.frame_pixels || {};
-        this.state.meta.total_frames = activeClip.total_frames ?? this.state.meta.total_frames;
-        this.state.meta.fps = activeClip.fps ?? this.state.meta.fps;
-        if (activeClip.layer_groups) {
-          this.state.layers.forEach((l) => {
-            l.groups = activeClip.layer_groups![l.id] || l.groups || [];
-          });
-        }
-      } else {
-        const animName = (this.state.meta.name || 'idle').replace(/^sample_character_anim$/, 'walk');
-        const defaultAnim: AnimationClipData = {
-          id: 'anim_default',
-          name: animName,
-          fps: this.state.meta.fps,
-          total_frames: this.state.meta.total_frames,
-          frame_pixels: this.state.frame_pixels,
-          layer_groups: {},
-        };
-        this.state.layers.forEach((l) => {
-          if (l.groups) {
-            defaultAnim.layer_groups![l.id] = [...l.groups];
-          }
-        });
-        this.state.animations = [defaultAnim];
-        this.state.activeAnimationId = 'anim_default';
-      }
-
       this.state.sheets = parsed.sheets || [];
-      // Ensure layers have frame_pixels and migrate top-level pixels if needed
-      if (this.state.layers.length > 0) {
-        const hasLayerPixels = this.state.layers.some((l) => l.frame_pixels && Object.keys(l.frame_pixels).length > 0);
-        if (!hasLayerPixels && this.state.frame_pixels && Object.keys(this.state.frame_pixels).length > 0) {
-          this.state.layers[0].frame_pixels = JSON.parse(JSON.stringify(this.state.frame_pixels));
-        }
-        for (const layer of this.state.layers) {
-          if (!layer.frame_pixels) {
-            layer.frame_pixels = {};
-          }
-          if (layer.visible === undefined) {
-            layer.visible = true;
-          }
-        }
-        this.invalidateAllFrames();
-        const total = this.state.meta.total_frames || 1;
-        for (let i = 0; i < total; i++) {
-          this.recomposeFrame(i);
-        }
+      for (const layer of this.state.layers) {
+        if (layer.visible === undefined) layer.visible = true;
+        layer.frame_pixels = {};
       }
+      this.state.animations = clips;
+      this.state.activeAnimationId =
+        clips.find((clip) => clip.id === parsed.activeAnimationId)?.id ?? clips[0].id;
 
-      // Migrations above changed the document, so the cached serialization is stale.
+      const activeClip = clips.find((clip) => clip.id === this.state.activeAnimationId)!;
+      this.state.meta.total_frames = activeClip.total_frames ?? this.state.meta.total_frames;
+      this.state.meta.fps = activeClip.fps ?? this.state.meta.fps;
+      this.state.frame_pixels = {};
+      this.adoptClipCels(activeClip);
+
+      // The document just changed shape, so the cached serializations are stale.
       this.jsonDirty = true;
       this.engineJsonDirty = true;
 
@@ -504,6 +498,112 @@ class ProjectService {
     } catch (err) {
       console.error('Failed to parse project JSON:', err);
     }
+  }
+
+  private isVersion2(parsed: any): boolean {
+    if (typeof parsed?.version === 'string' && parsed.version.startsWith('2.')) return true;
+    // Be forgiving about a missing version: cels are unambiguous on their own.
+    return Array.isArray(parsed?.animations) && parsed.animations.some((clip: any) => clip && clip.cels);
+  }
+
+  private readClipsV2(parsed: any): AnimationClipData[] {
+    const width = this.state.meta.canvas_width;
+    const height = this.state.meta.canvas_height;
+
+    const clips: AnimationClipData[] = (parsed.animations || []).map((clip: any) => {
+      const cels: Record<string, Record<number, PixelMap>> = {};
+      for (const [layerId, frames] of Object.entries(clip.cels || {})) {
+        const decoded: Record<number, PixelMap> = {};
+        for (const [frameKey, encoded] of Object.entries(frames as Record<string, EncodedCel>)) {
+          const pixels = decodeCel(encoded, width, height);
+          if (Object.keys(pixels).length > 0) decoded[Number(frameKey)] = pixels;
+        }
+        if (Object.keys(decoded).length > 0) cels[layerId] = decoded;
+      }
+      return {
+        id: clip.id,
+        name: clip.name,
+        fps: clip.fps ?? this.state.meta.fps,
+        total_frames: clip.total_frames ?? this.state.meta.total_frames,
+        cels,
+        layer_groups: clip.layer_groups || {},
+      };
+    });
+
+    return clips.length > 0 ? clips : [this.createEmptyClip()];
+  }
+
+  /**
+   * Migrates a v1 document.
+   *
+   * v1 kept one set of layer pixels shared by every clip, plus a flattened composite per
+   * clip. The active clip's artwork can be recovered per layer; for the others only the
+   * composite survives, so it is placed on the bottom-most layer, which is where a
+   * flattened image belongs.
+   */
+  private migrateClipsV1(parsed: any): AnimationClipData[] {
+    const layerPixels: Record<string, Record<number, PixelMap>> = {};
+    for (const layer of parsed.layers || []) {
+      if (layer?.frame_pixels && Object.keys(layer.frame_pixels).length > 0) {
+        layerPixels[layer.id] = layer.frame_pixels;
+      }
+    }
+
+    const bottomLayerId = [...(parsed.layers || [])].sort(
+      (a: any, b: any) => (a.z_index ?? 0) - (b.z_index ?? 0)
+    )[0]?.id;
+
+    const flatten = (composite: Record<number, PixelMap> | undefined): Record<string, Record<number, PixelMap>> => {
+      if (!bottomLayerId || !composite) return {};
+      const frames: Record<number, PixelMap> = {};
+      for (const [frameKey, map] of Object.entries(composite)) {
+        if (map && Object.keys(map).length > 0) frames[Number(frameKey)] = map;
+      }
+      return Object.keys(frames).length > 0 ? { [bottomLayerId]: frames } : {};
+    };
+
+    const legacyClips: any[] = Array.isArray(parsed.animations) && parsed.animations.length > 0 ? parsed.animations : [];
+    if (legacyClips.length === 0) {
+      const name = (this.state.meta.name || 'idle').replace(/^sample_character_anim$/, 'walk');
+      const layerGroups: Record<string, LayerFrameGroup[]> = {};
+      for (const layer of parsed.layers || []) {
+        if (layer?.groups) layerGroups[layer.id] = [...layer.groups];
+      }
+      return [
+        {
+          id: 'anim_default',
+          name,
+          fps: this.state.meta.fps,
+          total_frames: this.state.meta.total_frames,
+          cels: Object.keys(layerPixels).length > 0 ? layerPixels : flatten(parsed.frame_pixels),
+          layer_groups: layerGroups,
+        },
+      ];
+    }
+
+    const activeId = parsed.activeAnimationId || legacyClips[0].id;
+    return legacyClips.map((clip: any) => ({
+      id: clip.id,
+      name: clip.name,
+      fps: clip.fps ?? this.state.meta.fps,
+      total_frames: clip.total_frames ?? this.state.meta.total_frames,
+      cels:
+        clip.id === activeId && Object.keys(layerPixels).length > 0
+          ? layerPixels
+          : flatten(clip.frame_pixels),
+      layer_groups: clip.layer_groups || {},
+    }));
+  }
+
+  private createEmptyClip(): AnimationClipData {
+    return {
+      id: 'anim_default',
+      name: 'idle',
+      fps: this.state.meta.fps,
+      total_frames: this.state.meta.total_frames,
+      cels: {},
+      layer_groups: {},
+    };
   }
 
   public selectLayer(layerId: string | null): void {
@@ -1276,11 +1376,23 @@ class ProjectService {
    * Interpolates pixel motion across intermediate frames between startFrame and endFrame.
    * Replaces intermediate frames' pixel content with interpolated positions.
    */
-  public interpolateMotion(startFrame: number, endFrame: number, _easing: string = 'linear'): void {
+  /**
+   * Fills the frames between two keyframes by translating the artwork along the centroid
+   * path. The in-betweens are written into the owning layer, not just into the composite,
+   * so they survive a save and a reload.
+   */
+  public interpolateMotion(startFrame: number, endFrame: number, layerId?: string | null): void {
     if (endFrame - startFrame < 2) return;
 
-    const startPixels = this.state.frame_pixels[startFrame] || {};
-    const endPixels = this.state.frame_pixels[endFrame] || {};
+    const targetLayer =
+      (layerId && this.state.layers.find((l) => l.id === layerId)) ||
+      this.state.layers.find((l) => l.id === this.state.selectedLayerId) ||
+      this.state.layers[0];
+    if (!targetLayer) return;
+    if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
+
+    const startPixels = targetLayer.frame_pixels[startFrame] || {};
+    const endPixels = targetLayer.frame_pixels[endFrame] || {};
 
     // Helper to calculate pixel centroid
     const getCentroid = (pixels: Record<string, string>): { cx: number; cy: number; count: number } => {
@@ -1330,8 +1442,8 @@ class ProjectService {
         }
       }
 
-      this.state.frame_pixels[f] = interpolated;
-      this.frameRevisions[f] = (this.frameRevisions[f] || 0) + 1;
+      targetLayer.frame_pixels[f] = interpolated;
+      this.recomposeFrame(f);
     }
 
     this.updateJson();
@@ -1390,7 +1502,7 @@ class ProjectService {
       if (!layer.groups) continue;
       for (const grp of layer.groups) {
         if (grp.start_frame === frameIndex || grp.end_frame === frameIndex) {
-          this.interpolateMotion(grp.start_frame, grp.end_frame);
+          this.interpolateMotion(grp.start_frame, grp.end_frame, layer.id);
         }
       }
     }
@@ -1403,8 +1515,9 @@ class ProjectService {
     if (targetLayer) this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
     if (targetLayer) {
       if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
-      if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
-      targetLayer.frame_pixels[frameIndex][`${x},${y}`] = color;
+      // Cels are replaced rather than mutated, so an unchanged cel keeps its identity and
+      // with it its cached encoding.
+      targetLayer.frame_pixels[frameIndex] = { ...(targetLayer.frame_pixels[frameIndex] || {}), [`${x},${y}`]: color };
     }
     this.commitPixelEdit();
     this.recomposeFrame(frameIndex);
@@ -1420,11 +1533,11 @@ class ProjectService {
     if (targetLayer) this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
     if (targetLayer) {
       if (!targetLayer.frame_pixels) targetLayer.frame_pixels = {};
-      if (!targetLayer.frame_pixels[frameIndex]) targetLayer.frame_pixels[frameIndex] = {};
-      const map = targetLayer.frame_pixels[frameIndex];
+      const map = { ...(targetLayer.frame_pixels[frameIndex] || {}) };
       for (const p of pixels) {
         map[`${p.x},${p.y}`] = color;
       }
+      targetLayer.frame_pixels[frameIndex] = map;
     }
     this.commitPixelEdit();
     this.recomposeFrame(frameIndex);
@@ -1439,7 +1552,9 @@ class ProjectService {
       this.state.layers[0];
     if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
       this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
-      delete targetLayer.frame_pixels[frameIndex][`${x},${y}`];
+      const map = { ...targetLayer.frame_pixels[frameIndex] };
+      delete map[`${x},${y}`];
+      targetLayer.frame_pixels[frameIndex] = map;
       this.commitPixelEdit();
       this.recomposeFrame(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
@@ -1454,10 +1569,11 @@ class ProjectService {
       this.state.layers[0];
     if (targetLayer && targetLayer.frame_pixels?.[frameIndex]) {
       this.beginPixelEdit([{ layerId: targetLayer.id, frame: frameIndex }]);
-      const map = targetLayer.frame_pixels[frameIndex];
+      const map = { ...targetLayer.frame_pixels[frameIndex] };
       for (const p of pixels) {
         delete map[`${p.x},${p.y}`];
       }
+      targetLayer.frame_pixels[frameIndex] = map;
       this.commitPixelEdit();
       this.recomposeFrame(frameIndex);
       this.autoRecalculateGroupsForFrame(frameIndex);
@@ -1490,7 +1606,7 @@ class ProjectService {
     layer.groups.sort((a, b) => a.start_frame - b.start_frame);
 
     // Automatically calculate interpolation across the newly created group!
-    this.interpolateMotion(start, end);
+    this.interpolateMotion(start, end, layerId);
 
     this.updateJson();
     this.notify();
@@ -1534,20 +1650,47 @@ class ProjectService {
     if (!layer || !layer.groups) return;
     const grp = layer.groups.find((g) => g.id === groupId);
     if (!grp) return;
-    this.interpolateMotion(grp.start_frame, grp.end_frame);
+    this.interpolateMotion(grp.start_frame, grp.end_frame, layerId);
   }
 
   // --- Multi-Animation Management ---
+  /**
+   * Writes the working set back into the active clip. Artwork is stored per layer, so
+   * clips no longer share one set of layer pixels — painting in one cannot leak into
+   * another.
+   */
   public syncActiveAnimation(): void {
     const activeClip = this.state.animations.find((a) => a.id === this.state.activeAnimationId);
-    if (activeClip) {
-      activeClip.total_frames = this.state.meta.total_frames;
-      activeClip.fps = this.state.meta.fps;
-      activeClip.frame_pixels = { ...this.state.frame_pixels };
-      if (!activeClip.layer_groups) activeClip.layer_groups = {};
-      this.state.layers.forEach((l) => {
-        activeClip.layer_groups![l.id] = l.groups ? [...l.groups] : [];
-      });
+    if (!activeClip) return;
+
+    activeClip.total_frames = this.state.meta.total_frames;
+    activeClip.fps = this.state.meta.fps;
+    if (!activeClip.layer_groups) activeClip.layer_groups = {};
+
+    const cels: Record<string, Record<number, PixelMap>> = {};
+    this.state.layers.forEach((layer) => {
+      activeClip.layer_groups![layer.id] = layer.groups ? [...layer.groups] : [];
+      const frames = layer.frame_pixels || {};
+      const kept: Record<number, PixelMap> = {};
+      for (const [frameKey, map] of Object.entries(frames)) {
+        if (map && Object.keys(map).length > 0) kept[Number(frameKey)] = map as PixelMap;
+      }
+      if (Object.keys(kept).length > 0) cels[layer.id] = kept;
+    });
+    activeClip.cels = cels;
+  }
+
+  /** Loads a clip's cels into the layers, replacing whatever the previous clip left. */
+  private adoptClipCels(clip: AnimationClipData): void {
+    this.state.layers.forEach((layer) => {
+      const cels = clip.cels?.[layer.id];
+      layer.frame_pixels = cels ? { ...cels } : {};
+      layer.groups = clip.layer_groups?.[layer.id] ? [...clip.layer_groups[layer.id]] : [];
+    });
+    this.invalidateAllFrames();
+    const total = Math.max(1, this.state.meta.total_frames || 1);
+    for (let i = 0; i < total; i++) {
+      this.recomposeFrame(i);
     }
   }
 
@@ -1562,7 +1705,7 @@ class ProjectService {
       name: animName,
       fps: this.state.meta.fps,
       total_frames: 1,
-      frame_pixels: { 0: {} },
+      cels: {},
       layer_groups: {},
     };
     this.state.animations.push(newClip);
@@ -1580,13 +1723,8 @@ class ProjectService {
     this.state.activeAnimationId = animId;
     this.state.meta.total_frames = target.total_frames;
     this.state.meta.fps = target.fps;
-    this.state.frame_pixels = { ...target.frame_pixels };
-    this.invalidateAllFrames();
-
-    // Restore layer groups for this animation
-    this.state.layers.forEach((l) => {
-      l.groups = target.layer_groups?.[l.id] ? [...target.layer_groups[l.id]] : [];
-    });
+    this.state.frame_pixels = {};
+    this.adoptClipCels(target);
 
     this.updateJson();
     this.notify();
@@ -1641,18 +1779,65 @@ class ProjectService {
     }
   }
 
+  /**
+   * Serializes the document in the v2 format: layers carry the skeleton, each animation
+   * clip owns its artwork as run-length encoded cels, and the composite is left out
+   * because it is derived from the cels on load.
+   */
   private buildJson(): string {
     this.syncActiveAnimation();
-    const obj = {
-      version: '1.0.0',
+    const width = this.state.meta.canvas_width;
+    const height = this.state.meta.canvas_height;
+
+    const layers = this.state.layers.map((layer) => ({
+      id: layer.id,
+      name: layer.name,
+      parent_id: layer.parent_id ?? null,
+      z_index: layer.z_index ?? 0,
+      visible: layer.visible !== false,
+      sheet_id: layer.sheet_id,
+      default_frame: layer.default_frame,
+      color: layer.color,
+      default_transform: layer.default_transform,
+      pivot: layer.pivot,
+      relative_to_parent: layer.relative_to_parent !== false,
+      tracks: layer.tracks,
+    }));
+
+    const animations = this.state.animations.map((clip) => {
+      const cels: Record<string, Record<number, EncodedCel>> = {};
+      for (const [layerId, frames] of Object.entries(clip.cels || {})) {
+        const encodedFrames: Record<number, EncodedCel> = {};
+        for (const [frameKey, map] of Object.entries(frames)) {
+          const cel = map as PixelMap;
+          let cached = encodedCels.get(cel);
+          // The canvas size is part of the encoding, so a resize invalidates the cache.
+          if (!cached || cached.width !== width || cached.height !== height) {
+            cached = { width, height, encoded: encodeCel(cel, width, height) };
+            encodedCels.set(cel, cached);
+          }
+          if (cached.encoded) encodedFrames[Number(frameKey)] = cached.encoded;
+        }
+        if (Object.keys(encodedFrames).length > 0) cels[layerId] = encodedFrames;
+      }
+      return {
+        id: clip.id,
+        name: clip.name,
+        fps: clip.fps,
+        total_frames: clip.total_frames,
+        layer_groups: clip.layer_groups || {},
+        cels,
+      };
+    });
+
+    return JSON.stringify({
+      version: DOCUMENT_VERSION,
       meta: this.state.meta,
-      frame_pixels: this.state.frame_pixels,
-      sheets: [],
-      layers: this.state.layers,
-      animations: this.state.animations,
+      sheets: this.state.sheets || [],
+      layers,
+      animations,
       activeAnimationId: this.state.activeAnimationId,
-    };
-    return JSON.stringify(obj);
+    });
   }
 
   /** The full document, including pixels. Built on demand and cached until the next edit. */

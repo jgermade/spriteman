@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spritemotion — Document Format v2 Gantt (2026-09-07)</title>
+  <style>
+    :root {
+      --bg: #0f141c;
+      --card-bg: #18202c;
+      --card-border: #263344;
+      --text: #e2e8f0;
+      --text-muted: #8b9bb4;
+      --primary: #38bdf8;
+      --accent: #818cf8;
+      --done: #34d399;
+      --p1: #f87171;
+      --p2: #fb923c;
+      --p3: #38bdf8;
+      --p4: #818cf8;
+      --p5: #fbbf24;
+      --grid-line: #1f2937;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      padding: 2rem 1.5rem 4rem;
+      min-height: 100vh;
+    }
+
+    header, .container, .notes { max-width: 1200px; margin-left: auto; margin-right: auto; }
+
+    header {
+      margin-bottom: 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 1rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1.5rem;
+    }
+
+    h1 {
+      font-size: 1.8rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle { font-size: 0.95rem; color: var(--text-muted); margin-top: 0.35rem; }
+
+    .legend { display: flex; gap: 1.1rem; align-items: center; font-size: 0.82rem; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 0.45rem; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .dot.done { background: var(--done); }
+    .dot.p1 { background: var(--p1); }
+    .dot.p2 { background: var(--p2); }
+    .dot.p3 { background: var(--p3); }
+    .dot.p4 { background: var(--p4); }
+    .dot.p5 { background: var(--p5); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      max-width: 1200px;
+      margin: 0 auto 2rem;
+    }
+
+    .metric {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+    }
+
+    .metric .value { font-size: 1.5rem; font-weight: 700; color: var(--p1); font-variant-numeric: tabular-nums; }
+    .metric .label { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; line-height: 1.45; }
+
+    .container {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+    }
+
+    .gantt-header, .gantt-row { display: grid; grid-template-columns: 340px 1fr; }
+
+    .gantt-header {
+      border-bottom: 1px solid var(--card-border);
+      background: #131924;
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+
+    .gantt-header-label { padding: 0.9rem 1.25rem; border-right: 1px solid var(--card-border); }
+
+    .timeline-ticks { display: grid; grid-template-columns: repeat(6, 1fr); text-align: center; padding: 0.9rem 0; }
+    .tick { border-right: 1px dashed var(--grid-line); font-size: 0.72rem; }
+    .tick:last-child { border-right: none; }
+
+    .gantt-row { border-bottom: 1px solid var(--card-border); align-items: center; }
+    .gantt-row:last-child { border-bottom: none; }
+    .gantt-row:hover { background: #1b2432; }
+
+    .phase-row { background: #131924; }
+    .phase-row .task-name { color: var(--primary); text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem; }
+
+    .task-info { padding: 0.85rem 1.25rem; border-right: 1px solid var(--card-border); display: flex; flex-direction: column; gap: 0.2rem; }
+    .task-name { font-size: 0.88rem; font-weight: 600; color: #f1f5f9; }
+    .task-meta { font-size: 0.73rem; color: var(--text-muted); line-height: 1.4; }
+
+    .timeline-track { position: relative; min-height: 46px; display: flex; align-items: center; padding: 0 0.75rem; }
+    .grid-overlay { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(6, 1fr); pointer-events: none; }
+    .grid-col { border-right: 1px dashed var(--grid-line); }
+    .grid-col:last-child { border-right: none; }
+
+    .bar {
+      position: relative;
+      z-index: 2;
+      height: 22px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding: 0 0.6rem;
+      font-size: 0.73rem;
+      font-weight: 700;
+      white-space: nowrap;
+      color: #0b111a;
+    }
+
+    .bar.done { background: linear-gradient(135deg, #34d399, #10b981); }
+    .bar.p1 { background: linear-gradient(135deg, #f87171, #ef4444); }
+    .bar.p2 { background: linear-gradient(135deg, #fb923c, #f97316); }
+    .bar.p3 { background: linear-gradient(135deg, #38bdf8, #0ea5e9); }
+    .bar.p4 { background: linear-gradient(135deg, #818cf8, #6366f1); }
+    .bar.p5 { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+
+    .notes { margin-top: 2rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
+    .note { background: var(--card-bg); border: 1px solid var(--card-border); border-left: 3px solid var(--primary); border-radius: 10px; padding: 1rem 1.15rem; }
+    .note h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary); margin-bottom: 0.6rem; }
+    .note ul { margin-left: 1.05rem; }
+    .note li { font-size: 0.82rem; color: var(--text-muted); line-height: 1.65; }
+
+    @media (max-width: 720px) {
+      .gantt-header, .gantt-row { grid-template-columns: 200px 1fr; }
+      .task-info { padding: 0.7rem 0.8rem; }
+    }
+  </style>
+<style>
+  .page-body { display: block; }
+  .bar.done { background: linear-gradient(135deg, #34d399, #10b981); }
+</style>
+</head>
+<body>
+
+<div class="page-body">
+  <header>
+    <div>
+      <h1>Document Format v2</h1>
+      <div class="subtitle">Spritemotion — roadmap snapshot 2026-09-07, one owner for the artwork</div>
+    </div>
+    <div class="legend">
+      <span class="legend-item"><span class="dot done"></span> Shipped</span>
+      <span class="legend-item"><span class="dot p3"></span> Next</span>
+      <span class="legend-item"><span class="dot p5"></span> Backlog</span>
+    </div>
+  </header>
+
+  <section class="metrics">
+    <div class="metric"><div class="value" style="color: var(--done)">153 &rarr; 10 kB</div><div class="label">A real 24-frame project, saved</div></div>
+    <div class="metric"><div class="value" style="color: var(--done)">121 &rarr; 3 ms</div><div class="label">Serialization per save</div></div>
+    <div class="metric"><div class="value" style="color: var(--done)">0</div><div class="label">Long tasks on saves after the first</div></div>
+    <div class="metric"><div class="value" style="color: var(--done)">2 bugs</div><div class="label">Clip artwork leaking, and in-betweens lost on reload</div></div>
+  </section>
+
+  <div class="container">
+    <div class="gantt-header">
+      <div class="gantt-header-label">Track</div>
+      <div class="timeline-ticks">
+        <div class="tick">Shipped</div><div class="tick">W1</div><div class="tick">W2</div>
+        <div class="tick">W3</div><div class="tick">W4</div><div class="tick">W5</div>
+      </div>
+    </div>
+
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">Cel codec</span><span class="task-meta">Palette + run-length, row-major, documented decoder</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 15%; margin-left: 0%;">shipped</div>
+      </div>
+    </div>
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">One owner for artwork</span><span class="task-meta">animations[].cels replaces three copies of the pixels</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 15%; margin-left: 0%;">shipped</div>
+      </div>
+    </div>
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">v1 migration</span><span class="task-meta">Opens old projects, rewrites them as v2 on the next save</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 15%; margin-left: 0%;">shipped</div>
+      </div>
+    </div>
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">Incremental encoding</span><span class="task-meta">Cels are replaced, not mutated — a save re-encodes only what changed</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 15%; margin-left: 0%;">shipped</div>
+      </div>
+    </div>
+    <div class="gantt-row phase-row">
+      <div class="task-info"><span class="task-name">Format specification</span><span class="task-meta">docs/format.md, so any engine can play a project back</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar done" style="width: 15%; margin-left: 0%;">shipped</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Rotation &amp; scale gizmos</span><span class="task-meta">Model, evaluator and format all support them already</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 18%; margin-left: 17%;">next</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Easing-curve editing</span><span class="task-meta">Per-track curve panel in the timeline</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 16%; margin-left: 33%;">next</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Atlas import</span><span class="task-meta">A cel could reference an atlas rectangle instead of holding pixels</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 18%; margin-left: 45%;">next</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Spritesheet export</span><span class="task-meta">raster.rs — compose resolved frames into a sheet</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 18%; margin-left: 60%;">next</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Component-level tests</span><span class="task-meta">A mount harness for the .html setup scripts</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p3" style="width: 16%; margin-left: 72%;">next</div>
+      </div>
+    </div>
+    <div class="gantt-row">
+      <div class="task-info"><span class="task-name">Per-clip persistence</span><span class="task-meta">One storage record per clip instead of one per document</span></div>
+      <div class="timeline-track">
+        <div class="grid-overlay"><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div><div class="grid-col"></div></div>
+        <div class="bar p5" style="width: 18%; margin-left: 80%;">if needed</div>
+      </div>
+    </div>
+  </div>
+
+  <section class="notes">
+    <div class="note">
+      <h3>What a cel looks like</h3>
+      <ul>
+        <li><code>{ "p": ["#3a5f8a"], "r": [128, 0, 4, 1, 3964, 0] }</code> — palette, then run-length pairs in row-major order.</li>
+        <li>Index <code>0</code> is transparent; the runs always cover the whole canvas, so a decoder needs nothing but <code>meta</code>.</li>
+        <li>An empty cel is left out of the document entirely.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>Two bugs it fixed</h3>
+      <ul>
+        <li>A second animation clip inherited the first clip's artwork, because layer pixels were shared across clips.</li>
+        <li>Interpolated in-between frames lived only in the composite and disappeared on reload.</li>
+      </ul>
+    </div>
+    <div class="note">
+      <h3>Reading old projects</h3>
+      <ul>
+        <li>v1 opens unchanged and is rewritten as v2 on the next save.</li>
+        <li>The active clip recovers artwork per layer; other clips only ever had a flattened image, which lands on the bottom layer.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+</body>
+</html>
